@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local runtime data
+storage/
+*.db
+*.db-journal
+*.faiss
+*.pkl
+
+# Logs
+*.log
+logs/
+
+# Secrets / Local config
+.env
+.env.local
+local.yaml
+
+# Build / Distribution
+dist/
+build/
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
