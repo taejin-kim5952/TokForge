@@ -26,7 +26,7 @@ VSCode + Continue.dev 와 유료 AI API(OpenAI / Anthropic / Gemini) 사이에�
 ```
 [사용자 질문]
    ↓
-1. 정제          gemma4:e4b 로 오타·중복 제거, 의도 명확화
+1. 정제          gemma3:e4b 로 오타·중복 제거, 의도 명확화
    ↓
 2. 의미 캐시     같은/비슷한 질문이면 즉시 응답 (API 호출 X)
    ↓
@@ -67,7 +67,7 @@ VSCode + Continue.dev 와 유료 AI API(OpenAI / Anthropic / Gemini) 사이에�
 - 2️⃣ [Step 2 — 의미 캐시](docs/step02_의미캐시.md)
 - 3️⃣ [Step 3 — RAG 컨텍스트 주입](docs/step03_RAG.md)
 - 4️⃣ [Step 4 — 프롬프트 템플릿](docs/step04_템플릿.md)
-- 5️⃣ [Step 5 — 질문 정제 (gemma4:e4b)](docs/step05_정제.md)
+- 5️⃣ [Step 5 — 질문 정제 (gemma3:e4b)](docs/step05_정제.md)
 - 6️⃣ [Step 6 — 컨텍스트 압축](docs/step06_압축.md)
 - 7️⃣ [Step 7 — 모델 자동 라우팅](docs/step07_라우팅.md)
 - 8️⃣ [Step 8 — 비용/품질 모니터링](docs/step08_모니터링.md)
@@ -78,4 +78,4 @@ VSCode + Continue.dev 와 유료 AI API(OpenAI / Anthropic / Gemini) 사이에�
 
 MIT License — 자세한 내용은 [LICENSE](LICENSE) 참고.
 
-저장소: (GitHub URL — 추후 추가)
+저장소: https://github.com/taejin-kim5952/TokForge
