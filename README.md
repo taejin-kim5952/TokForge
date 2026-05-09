@@ -6,11 +6,13 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
-VSCode + Continue.dev 와 유료 AI API(OpenAI / Anthropic / Gemini) 사이에서 동작하는
-로컬 미들웨어입니다. 사용자 질문을 자동으로 정제 · 압축 · 컨텍스트 보강하여,
+VSCode + Continue.dev 와 AI 백엔드(로컬 Ollama / 외부 API: OpenAI · Anthropic · Gemini) 사이에서
+동작하는 로컬 미들웨어입니다. 사용자 질문을 자동으로 **캐싱·정제·규격화·압축하고 컨텍스트를 보강**하여,
 **더 적은 토큰으로 더 정확한 답변** 을 받을 수 있게 합니다.
 
-모든 최적화 처리는 로컬에서 실행되며, 유료 API 호출 단계에서만 외부와 통신합니다.
+토큰 절감의 가치는 백엔드와 무관합니다 —
+외부 API 라면 **비용 절감**, 로컬 LLM 이라면 **응답 속도·메모리·전력 절감** 으로 환산됩니다.
+모든 최적화 처리는 로컬에서 실행되며, 외부 API 사용 시에만 외부와 통신합니다.
 
 ---
 
