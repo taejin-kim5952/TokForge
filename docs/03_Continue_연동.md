@@ -9,7 +9,7 @@
 | VSCode 설치 | `code --version` |
 | Continue 확장 | VSCode 마켓플레이스에서 "Continue" 설치 |
 | TokForge 서버 실행 | `http://localhost:8000/health` 접속 → `ok` |
-| Ollama 실행 + 모델 | `ollama list` 에서 `gemma3:e2b` 보임 |
+| Ollama 실행 + 모델 | `ollama list` 에서 `gemma4:e2b` 보임 |
 
 ---
 
@@ -37,7 +37,7 @@ notepad $env:USERPROFILE\.continue\config.yaml
 models:
   - name: TokForge
     provider: openai
-    model: gemma3:e2b
+    model: gemma4:e2b
     apiBase: http://127.0.0.1:8000/v1
     apiKey: local
     roles:
@@ -50,7 +50,7 @@ models:
 |---|---|---|
 | `name` | `TokForge` | Continue UI 의 모델 선택창에 표시될 이름 (자유) |
 | `provider` | `openai` | TokForge 가 OpenAI 호환 API 라서 |
-| `model` | `gemma3:e2b` | 표시용 (실제 모델은 [config.py](../app/config.py) 의 `DEFAULT_MODEL` 이 결정) |
+| `model` | `gemma4:e2b` | 표시용 (실제 모델은 [config.py](../app/config.py) 의 `DEFAULT_MODEL` 이 결정) |
 | `apiBase` | `http://127.0.0.1:8000/v1` | TokForge 서버 주소 |
 | `apiKey` | `local` | 로컬용 더미 (TokForge 는 키 검증 안 함) |
 | `roles` | `[chat]` | 채팅 전용 (자동완성·임베딩 등은 별도 항목으로 추가) |
@@ -86,7 +86,7 @@ INFO: 127.0.0.1:xxxxx - "POST /v1/chat/completions HTTP/1.1" 200 OK
 models:
   - name: TokForge
     provider: openai
-    model: gemma3:e2b
+    model: gemma4:e2b
     apiBase: http://127.0.0.1:8000/v1
     apiKey: local
     roles:

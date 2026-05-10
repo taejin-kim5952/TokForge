@@ -13,7 +13,7 @@ Continue.dev
     ↓ POST /v1/chat/completions
 TokForge (FastAPI, 8000)
     ↓ POST /v1/chat/completions
-Ollama (gemma3:e2b, 11434)
+Ollama (gemma4:e2b, 11434)
     ↓ 응답
 TokForge → Continue.dev
 ```
@@ -47,7 +47,7 @@ TokForge/
 ```python
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/v1/chat/completions"
-DEFAULT_MODEL = "gemma3:e2b"
+DEFAULT_MODEL = "gemma4:e2b"
 ```
 
 ### [app/llm/ollama.py](../app/llm/ollama.py) — Ollama 호출
@@ -92,7 +92,7 @@ async def chat_completions(request: dict):
 ```yaml
 - name: TokForge
   provider: openai
-  model: gemma3:e2b
+  model: gemma4:e2b
   apiBase: http://127.0.0.1:8000/v1
   apiKey: local
   roles:

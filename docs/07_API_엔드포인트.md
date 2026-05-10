@@ -72,7 +72,7 @@ curl http://localhost:8000/health
 {
   "id": "chatcmpl-...",
   "object": "chat.completion",
-  "model": "gemma3:e2b",
+  "model": "gemma4:e2b",
   "choices": [{
     "index": 0,
     "message": {"role": "assistant", "content": "안녕하세요!"},
@@ -100,7 +100,7 @@ OpenAI 호환 모델 목록 (Continue 가 모델 선택창에 사용).
 {
   "object": "list",
   "data": [
-    {"id": "gemma3:e2b", "object": "model", ...}
+    {"id": "gemma4:e2b", "object": "model", ...}
   ]
 }
 ```
@@ -110,7 +110,7 @@ OpenAI 호환 모델 목록 (Continue 가 모델 선택창에 사용).
 현재 실제 사용 중인 모델 (TokForge 자체 진단용).
 
 ```json
-{ "model": "gemma3:e2b" }
+{ "model": "gemma4:e2b" }
 ```
 
 ---

@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from app.llm import ollama
 from app.services.cache import get_cache
+from app.services.rag import get_rag
 
 router = APIRouter()
 
@@ -15,6 +16,25 @@ def _last_user_message(request: dict) -> str | None:
         if msg.get("role") == "user":
             return msg.get("content")
     return None
+
+
+def _build_context(request: dict):
+    """RAG 검색 → chunk 들을 컨텍스트 문자열로 합치기."""
+    query = _last_user_message(request)
+    if not query:
+        return ""
+    chunks = get_rag().search(query, k=3)
+    if not chunks:
+        return ""
+    return "\n\n".join(c["content"] for c in chunks)
+
+
+def _inject_context(request: dict, context: str) -> None:
+    """messages 의 system 프롬프트에 컨텍스트 추가."""
+    system_msg = next(
+        (m for m in messages if m.get("role") == "system"),
+        None,
+    )
 
 
 @router.post("/v1/chat/completions")

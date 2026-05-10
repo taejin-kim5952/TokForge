@@ -24,18 +24,42 @@ VSCode + Continue.dev 와 AI 백엔드(로컬 Ollama / 외부 API: OpenAI · Ant
 ```
 [사용자 질문]
    ↓
-1. 정제          gemma3:e4b 로 오타·중복 제거, 의도 명확화
+1. 정제          gemma4:e4b 로 오타·중복 제거, 의도 명확화
    ↓
-2. 의미 캐시     같은/비슷한 질문이면 즉시 응답 (API 호출 X)
+2. 규격화        정해진 템플릿에 맞춰 형식 통일 ([Role][Q][Output] 등)
    ↓
-3. RAG 검색      회사 가이드 / 문서 컨텍스트 자동 추가
+3. 의미 캐시     같은/비슷한 질문이면 즉시 응답 (API 호출 X)
    ↓
-4. 압축          핵심만 남기고 토큰 줄이기
+4. RAG 검색      회사 가이드 / 문서 컨텍스트 자동 추가
    ↓
-5. API 호출      OpenAI / Anthropic / Gemini
+5. 압축          핵심만 남기고 토큰 줄이기
    ↓
-[답변 + 비용/토큰 기록]
+6. 모델 라우팅   복잡도 따라 백엔드 자동 선택 (Ollama / OpenAI / Anthropic / Gemini)
+   ↓
+7. API 호출
+   ↓
+8. 응답 + 모니터링 기록 (토큰·비용·지연시간 누적)
+   ↓
+[사용자]
 ```
+
+---
+
+## ✅ 현재 진행 상황
+
+| 단계 | 기능 | 상태 | 구현 방식 |
+|---|---|---|---|
+| 1 | 기본 프록시 | ✅ 완료 | 직접 구현 (FastAPI + httpx) |
+| 2 | 의미 캐시 | ✅ 완료 | 직접 구현 (sentence-transformers + FAISS) |
+| 3 | RAG 컨텍스트 주입 | ✅ 완료 | **LangChain** (FAISS + HuggingFace) |
+| 4 | 프롬프트 템플릿 (규격화) | ⏳ 예정 | LangChain (ChatPromptTemplate) |
+| 5 | 질문 정제 (gemma4:e4b) | ⏳ 예정 | LangChain |
+| 6 | 컨텍스트 압축 | ⏳ 예정 | LangChain |
+| 7 | 모델 자동 라우팅 | ⏳ 예정 | LangChain |
+| 8 | 비용/품질 모니터링 | ⏳ 예정 | 자체 구현 (LangSmith 검토) |
+
+> **설계 원칙**: Step 1~2 는 학습 목적의 직접 구현, Step 3 부터는 LangChain 도입.
+> Step 1~2 의 직접 구현은 임베딩·FAISS·코사인 유사도 원리를 손에 익히는 학습 자산으로 보존.
 
 ---
 
@@ -61,14 +85,14 @@ VSCode + Continue.dev 와 AI 백엔드(로컬 Ollama / 외부 API: OpenAI · Ant
 - 📋 [11. 변경 이력](docs/11_변경_이력.md) — 단계별 작업 기록
 
 ### 🚧 단계별 개발
-- 1️⃣ [Step 1 — 기본 프록시](docs/step01_기본프록시.md)
-- 2️⃣ [Step 2 — 의미 캐시](docs/step02_의미캐시.md)
-- 3️⃣ [Step 3 — RAG 컨텍스트 주입](docs/step03_RAG.md)
-- 4️⃣ [Step 4 — 프롬프트 템플릿](docs/step04_템플릿.md)
-- 5️⃣ [Step 5 — 질문 정제 (gemma3:e4b)](docs/step05_정제.md)
-- 6️⃣ [Step 6 — 컨텍스트 압축](docs/step06_압축.md)
-- 7️⃣ [Step 7 — 모델 자동 라우팅](docs/step07_라우팅.md)
-- 8️⃣ [Step 8 — 비용/품질 모니터링](docs/step08_모니터링.md)
+- ✅ 1️⃣ [Step 1 — 기본 프록시](docs/step01_기본프록시.md)
+- ✅ 2️⃣ [Step 2 — 의미 캐시](docs/step02_의미캐시.md)
+- ✅ 3️⃣ [Step 3 — RAG 컨텍스트 주입](docs/step03_RAG.md) (LangChain)
+- ⏳ 4️⃣ [Step 4 — 프롬프트 템플릿](docs/step04_템플릿.md)
+- ⏳ 5️⃣ [Step 5 — 질문 정제 (gemma4:e4b)](docs/step05_정제.md)
+- ⏳ 6️⃣ [Step 6 — 컨텍스트 압축](docs/step06_압축.md)
+- ⏳ 7️⃣ [Step 7 — 모델 자동 라우팅](docs/step07_라우팅.md)
+- ⏳ 8️⃣ [Step 8 — 비용/품질 모니터링](docs/step08_모니터링.md)
 
 ---
 
