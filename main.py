@@ -2,7 +2,18 @@
 
 from fastapi import FastAPI
 
-from app.api import health, chat, models, cache, rag
+from app.api import (
+    cache,
+    chat,
+    compressor,
+    health,
+    models,
+    monitor,
+    prompt,
+    rag,
+    refiner,
+    router as router_api,
+)
 
 app = FastAPI(
     title="TokForge",
@@ -16,3 +27,8 @@ app.include_router(chat.router)
 app.include_router(models.router)
 app.include_router(cache.router)
 app.include_router(rag.router)
+app.include_router(prompt.router)
+app.include_router(refiner.router)
+app.include_router(compressor.router)
+app.include_router(router_api.router)
+app.include_router(monitor.router)

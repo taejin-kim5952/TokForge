@@ -53,10 +53,10 @@ VSCode + Continue.dev 와 AI 백엔드(로컬 Ollama / 외부 API: OpenAI · Ant
 | 2 | 의미 캐시 | ✅ 완료 | 직접 구현 (sentence-transformers + FAISS) |
 | 3 | RAG 컨텍스트 주입 | ✅ 완료 | **LangChain** (FAISS + HuggingFace) |
 | 4 | 프롬프트 템플릿 (규격화) | ⏳ 예정 | LangChain (ChatPromptTemplate) |
-| 5 | 질문 정제 (gemma4:e4b) | ⏳ 예정 | LangChain |
-| 6 | 컨텍스트 압축 | ⏳ 예정 | LangChain |
-| 7 | 모델 자동 라우팅 | ⏳ 예정 | LangChain |
-| 8 | 비용/품질 모니터링 | ⏳ 예정 | 자체 구현 (LangSmith 검토) |
+| 5 | 질문 정제 (gemma4:latest) | ✅ 완료 | **LangChain** (PromptTemplate) |
+| 6 | 컨텍스트 압축 | ✅ 완료 | **LangChain** (PromptTemplate) |
+| 7 | 모델 자동 라우팅 | ✅ 완료 | **LangChain** (PromptTemplate) |
+| 8 | 비용/품질 모니터링 | ✅ 완료 | **자체 구현** (SQLite + 집계 API) |
 
 > **설계 원칙**: Step 1~2 는 학습 목적의 직접 구현, Step 3 부터는 LangChain 도입.
 > Step 1~2 의 직접 구현은 임베딩·FAISS·코사인 유사도 원리를 손에 익히는 학습 자산으로 보존.
@@ -89,10 +89,10 @@ VSCode + Continue.dev 와 AI 백엔드(로컬 Ollama / 외부 API: OpenAI · Ant
 - ✅ 2️⃣ [Step 2 — 의미 캐시](docs/step02_의미캐시.md)
 - ✅ 3️⃣ [Step 3 — RAG 컨텍스트 주입](docs/step03_RAG.md) (LangChain)
 - ⏳ 4️⃣ [Step 4 — 프롬프트 템플릿](docs/step04_템플릿.md)
-- ⏳ 5️⃣ [Step 5 — 질문 정제 (gemma4:e4b)](docs/step05_정제.md)
-- ⏳ 6️⃣ [Step 6 — 컨텍스트 압축](docs/step06_압축.md)
-- ⏳ 7️⃣ [Step 7 — 모델 자동 라우팅](docs/step07_라우팅.md)
-- ⏳ 8️⃣ [Step 8 — 비용/품질 모니터링](docs/step08_모니터링.md)
+- ✅ 5️⃣ [Step 5 — 질문 정제](docs/step05_정제.md) (LangChain)
+- ✅ 6️⃣ [Step 6 — 컨텍스트 압축](docs/step06_압축.md) (LangChain)
+- ✅ 7️⃣ [Step 7 — 모델 자동 라우팅](docs/step07_라우팅.md) (LangChain)
+- ✅ 8️⃣ [Step 8 — 비용/품질 모니터링](docs/step08_모니터링.md) (자체 구현)
 
 ---
 

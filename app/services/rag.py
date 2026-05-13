@@ -1,7 +1,10 @@
 """RAG — LangChain 기반 문서 청킹·검색."""
 
+import pickle
 from pathlib import Path
 
+import faiss
+import numpy as np
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -28,14 +31,41 @@ class RAGStore:
         self.store = self._load_or_create()
 
     def _load_or_create(self) -> FAISS:
-        if RAG_DIR.exists():
-            return FAISS.load_local(
-                str(RAG_DIR),
-                self.embeddings,
-                allow_dangerous_deserialization=True,
-            )
-        # 빈 인덱스로 시작 (첫 add 시 실제 생성)
-        return None
+        """Windows 한글 경로 우회 — LangChain save_local/load_local 대신 수동 직렬화."""
+        faiss_path = RAG_DIR / "index.faiss"
+        pkl_path = RAG_DIR / "index.pkl"
+
+        if not (faiss_path.exists() and pkl_path.exists()):
+            return None  # 첫 add 시 생성
+
+        # FAISS 인덱스 로드 (bytes → deserialize)
+        data = np.frombuffer(faiss_path.read_bytes(), dtype=np.uint8)
+        index = faiss.deserialize_index(data)
+
+        # docstore + 매핑 로드 (pickle)
+        with open(pkl_path, "rb") as f:
+            docstore, index_to_docstore_id = pickle.load(f)
+
+        return FAISS(
+            embedding_function=self.embeddings,
+            index=index,
+            docstore=docstore,
+            index_to_docstore_id=index_to_docstore_id,
+        )
+
+    def _save(self):
+        """Windows 한글 경로 우회 — faiss.write_index 대신 serialize."""
+        RAG_DIR.mkdir(parents=True, exist_ok=True)
+
+        faiss_path = RAG_DIR / "index.faiss"
+        pkl_path = RAG_DIR / "index.pkl"
+
+        # FAISS 인덱스 저장
+        faiss_path.write_bytes(faiss.serialize_index(self.store.index).tobytes())
+
+        # docstore + 매핑 저장
+        with open(pkl_path, "wb") as f:
+            pickle.dump((self.store.docstore, self.store.index_to_docstore_id), f)
 
     def add_document(self, source: str, text: str) -> int:
         """문서 → 청킹 → 인덱스 추가."""
@@ -53,8 +83,7 @@ class RAGStore:
         else:
             self.store.add_documents(docs)
 
-        RAG_DIR.parent.mkdir(parents=True, exist_ok=True)
-        self.store.save_local(str(RAG_DIR))
+        self._save()
         return len(chunks)
 
     def search(self, query: str, k: int = TOP_K) -> list[dict]:
