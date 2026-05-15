@@ -27,6 +27,8 @@ storage/
 *.db-journal
 *.faiss
 *.pkl
+# Local env files (production is committed for build)
+.env.development
 
 # Logs
 *.log

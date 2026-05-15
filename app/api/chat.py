@@ -2,7 +2,13 @@
 
 흐름: 정제(5) → 캐시(2) → RAG(3) → 압축(6) → 템플릿(4) → 라우팅(7) → Ollama
 모니터링(8) 은 각 단계의 변화를 dict 로 수집해 응답 직전 SQLite 기록.
+
+스트리밍 모드에서는 OpenAI 표준 SSE 청크 앞에 커스텀
+'pipeline' 이벤트를 인터리브해 보내 프론트엔드 시각화를 지원한다.
+('event' 필드가 있는 청크는 OpenAI 호환 클라이언트가 무시하므로 호환성 유지)
 """
+
+import json
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -26,8 +32,13 @@ from app.services.router import get_router as get_model_router
 router = APIRouter()
 
 
+def _sse_event(event: str, **payload) -> str:
+    """커스텀 SSE 이벤트 (OpenAI 표준에 없는 'event' 필드 포함)."""
+    body = {"event": event, **payload}
+    return f"data: {json.dumps(body, ensure_ascii=False)}\n\n"
+
+
 def _last_user_message(request: dict) -> str | None:
-    """messages 배열에서 마지막 user 메시지 추출."""
     for msg in reversed(request.get("messages", [])):
         if msg.get("role") == "user":
             return msg.get("content")
@@ -35,7 +46,6 @@ def _last_user_message(request: dict) -> str | None:
 
 
 def _replace_last_user_message(request: dict, new_content: str) -> None:
-    """마지막 user 메시지의 content 를 정제본으로 교체."""
     messages = request.get("messages", [])
     for msg in reversed(messages):
         if msg.get("role") == "user":
@@ -44,29 +54,22 @@ def _replace_last_user_message(request: dict, new_content: str) -> None:
 
 
 async def _refine_query(request: dict, metrics: dict) -> str | None:
-    """Step 5 — 마지막 user 메시지 정제."""
     if not ENABLE_QUERY_REFINEMENT:
         return _last_user_message(request)
-
     original = _last_user_message(request)
     metrics["original"] = original
     if not original:
         return None
-
     refined = await get_refiner().refine(original)
     metrics["refined"] = refined
     metrics["refined_changed"] = refined != original
     if refined != original:
         _replace_last_user_message(request, refined)
-        print(
-            f"[REFINER] original={original!r} → refined={refined!r}",
-            flush=True,
-        )
+        print(f"[REFINER] original={original!r} → refined={refined!r}", flush=True)
     return refined
 
 
 def _build_context(query: str, metrics: dict) -> str:
-    """RAG 검색 → chunk 들을 컨텍스트 문자열로 합치기."""
     if not query:
         return ""
     chunks = get_rag().search(query, k=3)
@@ -81,7 +84,6 @@ def _build_context(query: str, metrics: dict) -> str:
 
 
 async def _compress_context(query: str, context: str, metrics: dict) -> str:
-    """Step 6 — RAG 컨텍스트 압축."""
     if not ENABLE_CONTEXT_COMPRESSION or not context:
         metrics["ctx_after"] = len(context)
         return context
@@ -91,12 +93,8 @@ async def _compress_context(query: str, context: str, metrics: dict) -> str:
 
 
 def _inject_context_legacy(request: dict, context: str) -> None:
-    """ENABLE_PROMPT_TEMPLATE=False 일 때의 폴백."""
     messages = request.setdefault("messages", [])
-    system_msg = next(
-        (m for m in messages if m.get("role") == "system"),
-        None,
-    )
+    system_msg = next((m for m in messages if m.get("role") == "system"), None)
     block = f"참고 문서:\n{context}\n\n위 내용을 참고해 답하세요."
     if system_msg:
         system_msg["content"] = system_msg["content"] + "\n\n" + block
@@ -105,20 +103,15 @@ def _inject_context_legacy(request: dict, context: str) -> None:
 
 
 def _apply_template(request: dict, rag_context: str) -> None:
-    """Step 4 — 프롬프트 템플릿 적용."""
     if ENABLE_PROMPT_TEMPLATE:
         user_messages = request.get("messages", [])
-        request["messages"] = get_template_service().apply(
-            user_messages,
-            rag_context or None,
-        )
+        request["messages"] = get_template_service().apply(user_messages, rag_context or None)
     else:
         if rag_context:
             _inject_context_legacy(request, rag_context)
 
 
 async def _select_model(query: str | None, request: dict, metrics: dict) -> None:
-    """Step 7 — 라우팅으로 모델 선택. 토글 OFF 면 폴백."""
     if not ENABLE_MODEL_ROUTING:
         metrics["tier"] = None
         metrics["model"] = None
@@ -131,7 +124,6 @@ async def _select_model(query: str | None, request: dict, metrics: dict) -> None
 
 
 def _extract_usage(response: dict, metrics: dict) -> None:
-    """Ollama 응답에서 토큰 사용량 추출."""
     usage = response.get("usage") or {}
     metrics["prompt_toks"] = usage.get("prompt_tokens")
     metrics["completion_toks"] = usage.get("completion_tokens")
@@ -139,39 +131,105 @@ def _extract_usage(response: dict, metrics: dict) -> None:
 
 
 def _record(metrics: dict) -> None:
-    """모니터 저장 (토글 OFF 면 noop)."""
     if not ENABLE_MONITORING:
         return
     get_monitor().record(metrics)
 
 
+async def _streaming_generator(request: dict, metrics: dict, started: int):
+    """스트리밍 응답 — 파이프라인 이벤트 + Ollama 토큰."""
+    try:
+        # Step 5 — Refine
+        original = _last_user_message(request)
+        if ENABLE_QUERY_REFINEMENT and original:
+            yield _sse_event("pipeline", step="refine", status="start")
+            await _refine_query(request, metrics)
+            yield _sse_event(
+                "pipeline", step="refine", status="done",
+                original=original,
+                refined=metrics.get("refined"),
+                changed=metrics.get("refined_changed", False),
+            )
+            query = metrics.get("refined") or original
+        else:
+            query = original
+            metrics["original"] = original
+            yield _sse_event("pipeline", step="refine", status="done", changed=False)
+
+        # Step 2 — Cache
+        cache = get_cache()
+        cached = cache.lookup(query) if query else None
+        cache_hit = cached is not None
+        metrics["cache_hit"] = cache_hit
+        yield _sse_event("pipeline", step="cache", status="done", hit=cache_hit)
+
+        # 캐시 히트 — 즉시 응답
+        if cache_hit and cached is not None:
+            try:
+                cached_content = cached["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                cached_content = ""
+            chunk = {
+                "choices": [{
+                    "delta": {"role": "assistant", "content": cached_content},
+                    "finish_reason": "stop",
+                }]
+            }
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            _extract_usage(cached, metrics)
+            return
+
+        # Step 3 — RAG
+        context = _build_context(query or "", metrics)
+        yield _sse_event(
+            "pipeline", step="rag", status="done",
+            chunks=metrics.get("rag_chunks", 0),
+        )
+
+        # Step 6 — Compress
+        context = await _compress_context(query or "", context, metrics)
+        yield _sse_event(
+            "pipeline", step="compress", status="done",
+            before=metrics.get("ctx_before"),
+            after=metrics.get("ctx_after"),
+        )
+
+        # Step 4 — Template
+        _apply_template(request, context)
+        yield _sse_event("pipeline", step="template", status="done")
+
+        # Step 7 — Route
+        await _select_model(query, request, metrics)
+        yield _sse_event(
+            "pipeline", step="route", status="done",
+            tier=metrics.get("tier"),
+            model=metrics.get("model"),
+        )
+
+        # Ollama 스트림 forward
+        async for line in ollama.chat_completion_stream(request):
+            yield line
+    finally:
+        metrics["latency_ms"] = now_ms() - started
+        _record(metrics)
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(request: dict):
-    """
-    OpenAI 호환 채팅 엔드포인트.
-    흐름: 정제 → 캐시 → RAG → 압축 → 템플릿 → 라우팅 → Ollama → 모니터링
-    """
+    """OpenAI 호환 채팅 엔드포인트."""
     metrics: dict = {}
     started = now_ms()
 
+    if request.get("stream"):
+        return StreamingResponse(
+            _streaming_generator(request, metrics, started),
+            media_type="text/event-stream",
+        )
+
+    # 비스트리밍 — 기존 로직 그대로
     try:
-        # Step 5 — 정제
         query = await _refine_query(request, metrics)
-
-        # 스트리밍 — 캐시 우회, 나머지 단계는 적용
-        if request.get("stream"):
-            context = _build_context(query or "", metrics)
-            context = await _compress_context(query or "", context, metrics)  # Step 6
-            _apply_template(request, context)                                  # Step 4
-            await _select_model(query, request, metrics)                       # Step 7
-            metrics["latency_ms"] = now_ms() - started
-            _record(metrics)        # 스트리밍은 토큰 수집 X (응답 끝까지 기다리지 않음)
-            return StreamingResponse(
-                ollama.chat_completion_stream(request),
-                media_type="text/event-stream",
-            )
-
-        # 비스트리밍 — 캐시 확인
         cache = get_cache()
         if query:
             cached = cache.lookup(query)
@@ -181,22 +239,17 @@ async def chat_completions(request: dict):
                 metrics["latency_ms"] = now_ms() - started
                 _record(metrics)
                 return cached
-
-        # 캐시 미스 → 풀 파이프라인
         context = _build_context(query or "", metrics)
-        context = await _compress_context(query or "", context, metrics)   # Step 6
-        _apply_template(request, context)                                   # Step 4
-        await _select_model(query, request, metrics)                        # Step 7
+        context = await _compress_context(query or "", context, metrics)
+        _apply_template(request, context)
+        await _select_model(query, request, metrics)
         response = await ollama.chat_completion(request)
-
         if query:
             cache.save(query, response)
-
         _extract_usage(response, metrics)
         metrics["latency_ms"] = now_ms() - started
         _record(metrics)
         return response
-
     except Exception as e:
         metrics["error"] = repr(e)
         metrics["latency_ms"] = now_ms() - started
