@@ -32,6 +32,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "https://tokforge-frontend.blackrock-5366afe3.koreacentral.azurecontainerapps.io",
+        "https://www.tokforge.ai.kr",
     ],
     allow_credentials=True,
     allow_methods=["*"],
