@@ -1,12 +1,29 @@
-"""TokForge 설정값."""
+"""TokForge 설정값.
+
+환경변수 우선, 없으면 아래 상수 사용 (.env 파일 자동 로드).
+"""
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Ollama 연결 정보
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/v1/chat/completions"
+
+
+# Step 9 — Langfuse 관찰성
+LANGFUSE_ENABLED = os.environ.get("LANGFUSE_ENABLED", "false").lower() == "true"
+LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
 # 모델 식별자 — 여러 곳에서 참조되므로 한 곳에서 정의
 _GEMMA4_SMALL = "gemma4:e2b"
 _GEMMA4_LARGE = "gemma4:latest"
+_GEMMA3_TINY  = "gemma3:1b"
 
 # 기본 모델 (라우팅 OFF 또는 분류 실패 시 폴백)
 DEFAULT_MODEL = _GEMMA4_SMALL
@@ -16,7 +33,7 @@ ENABLE_PROMPT_TEMPLATE = True
 
 # Step 5 — 질문 정제 (작은 LLM 으로 오타·중복 제거, 의도 명확화)
 ENABLE_QUERY_REFINEMENT = True
-REFINER_MODEL = _GEMMA4_LARGE
+REFINER_MODEL = _GEMMA3_TINY
 
 # Step 6 — 컨텍스트 압축 (RAG 결과를 LLM 으로 핵심만 추출)
 ENABLE_CONTEXT_COMPRESSION = True

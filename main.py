@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 from app.api import (
+    admin,
     cache,
     chat,
     compressor,
@@ -49,3 +50,4 @@ app.include_router(refiner.router)
 app.include_router(compressor.router)
 app.include_router(router_api.router)
 app.include_router(monitor.router)
+app.include_router(admin.router)

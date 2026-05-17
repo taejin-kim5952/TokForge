@@ -47,6 +47,25 @@ class MonitorService:
                 error           TEXT
             )
         """)
+
+        # 단계별 시간·모델 컬럼 마이그레이션 (기존 DB 와 호환)
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(requests)").fetchall()}
+        new_cols = {
+            "refine_ms":      "INTEGER",
+            "cache_ms":       "INTEGER",
+            "rag_ms":         "INTEGER",
+            "compress_ms":    "INTEGER",
+            "template_ms":    "INTEGER",
+            "route_ms":       "INTEGER",
+            "refine_model":   "TEXT",
+            "compress_model": "TEXT",
+            "compare_id":     "TEXT",
+            "mode":           "TEXT",
+        }
+        for col, typ in new_cols.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE requests ADD COLUMN {col} {typ}")
+
         conn.commit()
         conn.close()
 
@@ -61,9 +80,12 @@ class MonitorService:
                     rag_chunks, ctx_before, ctx_after,
                     tier, model,
                     prompt_toks, completion_toks, total_toks,
-                    latency_ms, cache_hit, error
+                    latency_ms, cache_hit, error,
+                    refine_ms, cache_ms, rag_ms, compress_ms, template_ms, route_ms,
+                    refine_model, compress_model,
+                    compare_id, mode
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("original"),
@@ -80,6 +102,16 @@ class MonitorService:
                     data.get("latency_ms"),
                     data.get("cache_hit", False),
                     data.get("error"),
+                    data.get("refine_ms"),
+                    data.get("cache_ms"),
+                    data.get("rag_ms"),
+                    data.get("compress_ms"),
+                    data.get("template_ms"),
+                    data.get("route_ms"),
+                    data.get("refine_model"),
+                    data.get("compress_model"),
+                    data.get("compare_id"),
+                    data.get("mode"),
                 ),
             )
             conn.commit()
@@ -148,6 +180,15 @@ class MonitorService:
             "SELECT COUNT(*) FROM requests WHERE error IS NOT NULL"
         ).fetchone()[0]
 
+        # 단계별 평균 시간 (NULL 은 제외)
+        stage_cols = ["refine_ms", "cache_ms", "rag_ms", "compress_ms", "template_ms", "route_ms"]
+        stage_avg = {}
+        for col in stage_cols:
+            avg = conn.execute(
+                f"SELECT AVG({col}) FROM requests WHERE {col} IS NOT NULL"
+            ).fetchone()[0]
+            stage_avg[f"avg_{col}"] = round(avg, 1) if avg else None
+
         conn.close()
 
         return {
@@ -164,6 +205,7 @@ class MonitorService:
             "tier_distribution": {t: n for t, n in tier_dist},
             "model_distribution": {m: n for m, n in model_dist},
             "error_count": errors,
+            **stage_avg,
         }
 
 
