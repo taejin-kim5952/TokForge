@@ -8,8 +8,10 @@
 |---|---|
 | VSCode 설치 | `code --version` |
 | Continue 확장 | VSCode 마켓플레이스에서 "Continue" 설치 |
-| TokForge 서버 실행 | `http://localhost:8000/health` 접속 → `ok` |
+| TokForge 서버 실행 | `http://localhost:8000/healthz` 접속 → `ok` |
 | Ollama 실행 + 모델 | `ollama list` 에서 `gemma4:e2b` 보임 |
+
+> **인증 무관:** `/v1/chat/completions` 엔드포인트는 현재 인증 없이 호출 가능. Continue는 OAuth 로그인 없이 그대로 사용할 수 있습니다. (운영 진입 시 API Key 또는 토큰 추가 검토)
 
 ---
 
