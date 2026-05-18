@@ -8,6 +8,7 @@
 ('event' 필드가 있는 청크는 OpenAI 호환 클라이언트가 무시하므로 호환성 유지)
 """
 
+import logging
 import json
 import uuid
 from copy import deepcopy
@@ -39,6 +40,9 @@ from app.services.prompt import get_template_service
 from app.services.rag import get_rag
 from app.services.refiner import get_refiner
 from app.services.router import get_router as get_model_router
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
@@ -142,6 +146,9 @@ def _apply_template(request: dict, rag_context: str) -> None:
 
 
 async def _select_model(query: str | None, request: dict, metrics: dict) -> None:
+    logger.info("query : %s", query)
+    logger.info("request : %s", request)
+    logger.info("metrics : %s", metrics)
     if not _pipeline_enabled(request, "route", ENABLE_MODEL_ROUTING):
         metrics["tier"] = None
         metrics["model"] = None

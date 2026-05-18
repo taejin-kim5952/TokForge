@@ -9,6 +9,7 @@ import httpx
 from langchain.prompts import PromptTemplate
 
 from app.config import OLLAMA_CHAT_URL, REFINER_MODEL
+from app.services import prompt_repo
 
 
 REFINER_TEMPLATE = """You are a query refiner. Clean up the user's question for downstream LLM processing.
@@ -35,7 +36,6 @@ class QueryRefinerService:
     """사용자 질문을 LLM 으로 정제. 재호출 방지 in-memory 캐시 포함."""
 
     def __init__(self) -> None:
-        self._template = PromptTemplate.from_template(REFINER_TEMPLATE)
         self._cache: dict[str, str] = {}
 
     async def refine(self, query: str) -> str:
@@ -48,8 +48,10 @@ class QueryRefinerService:
         if cached is not None:
             return cached
 
-        # LLM 호출
-        prompt = self._template.format(query=query)
+        # LLM 호출 — DB 활성 프롬프트로 매번 새로 빌드
+        template_body = prompt_repo.get_active("refiner") or REFINER_TEMPLATE
+        template = PromptTemplate.from_template(template_body)
+        prompt = template.format(query=query)
         try:
             raw = await self._call_ollama(prompt)
         except Exception as e:

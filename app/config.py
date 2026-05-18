@@ -51,3 +51,31 @@ MODEL_TIERS = {
 # Step 8 — 비용/품질 모니터링 (SQLite 기반 요청별 지표 기록)
 ENABLE_MONITORING = True
 MONITOR_DB_PATH = "storage/monitor.db"
+
+
+# ────────────── Auth (Google OAuth + 세션) ──────────────
+ENV = os.environ.get("ENV", "dev")  # "dev" | "prod"
+
+# Google OAuth — credentials은 .env에서 주입
+GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI  = os.environ.get(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/auth/google/callback",
+)
+
+# 세션 쿠키
+SESSION_COOKIE_NAME = "tf_session"
+SESSION_TTL_DAYS = 30
+SESSION_REFRESH_THRESHOLD_DAYS = 7  # 만료까지 N일 이하 남으면 자동 연장
+COOKIE_SECURE = ENV == "prod"  # HTTPS 환경에서만 True
+
+# 프론트엔드 origin 허용 목록 — return_to 검증에 사용 (open-redirect 차단)
+FRONTEND_ORIGINS = [
+    "http://localhost:5173",
+    "https://tokforge-frontend.blackrock-5366afe3.koreacentral.azurecontainerapps.io",
+    "https://www.tokforge.ai.kr",
+]
+
+# 개발 편의 — 설정 시 OAuth 없이 그 user_id로 인증된 것처럼 동작 (운영에서 절대 사용 X)
+DEV_USER_ID = os.environ.get("DEV_USER_ID")  # str or None

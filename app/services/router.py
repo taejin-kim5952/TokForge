@@ -3,8 +3,10 @@
 작은 LLM 으로 사용자 질문의 복잡도를 simple/medium/complex 로 분류해서
 적합한 답변 모델을 선택한다.
 """
-
+import logging
+import time
 import httpx
+
 from langchain.prompts import PromptTemplate
 
 from app.config import (
@@ -13,6 +15,8 @@ from app.config import (
     OLLAMA_CHAT_URL,
     ROUTER_MODEL,
 )
+
+logger = logging.getLogger(__name__)
 
 
 CLASSIFIER_TEMPLATE = """You are a query complexity classifier. Classify the user's question into exactly one of:
@@ -29,6 +33,7 @@ Classification:"""
 
 
 _VALID_TIERS = ("simple", "medium", "complex")
+
 
 
 class ModelRouterService:
@@ -57,15 +62,12 @@ class ModelRouterService:
         try:
             raw = await self._call_ollama(prompt)
         except Exception as e:
-            print(f"[ROUTER ERROR] LLM call failed: {e}", flush=True)
+            logger.exception("router LLM call failed — fallback to medium")
             return "medium"     # 안전한 중간값
 
         tier = self._parse(raw)
         if tier not in _VALID_TIERS:
-            print(
-                f"[ROUTER WARN] invalid classification {raw!r} → fallback to medium",
-                flush=True,
-            )
+            logger.warning("invalid classification %r — fallback to medium", raw)
             return "medium"
 
         self._cache[query] = tier
@@ -79,9 +81,11 @@ class ModelRouterService:
             "stream": False,
             "temperature": 0.0,
         }
+        start = time.perf_counter()
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(OLLAMA_CHAT_URL, json=request)
             data = response.json()
+        logger.info("+++++++++++++++++++++++++ ollama call took +++++++++++++++++++++++++  ==> %.3fs", time.perf_counter() - start)
         return data["choices"][0]["message"]["content"]
 
     def _parse(self, raw: str) -> str:
