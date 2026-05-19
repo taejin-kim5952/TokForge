@@ -106,9 +106,14 @@ def _build_context(request: dict, query: str, metrics: dict) -> str:
     if not query or not _pipeline_enabled(request, "rag", True):
         metrics["rag_chunks"] = 0
         return ""
-    chunks = get_rag().search(query, k=3)
+    project_id: int | None = request.get("project_id")
+    store = get_rag(project_id)
+    # 프로젝트 전용 인덱스에 문서가 없으면 글로벌 인덱스로 폴백
+    if project_id is not None and store.store is None:
+        store = get_rag(None)
+    chunks = store.search(query, k=3)
     metrics["rag_chunks"] = len(chunks)
-    print(f"[RAG DEBUG] query={query!r}, chunks={len(chunks)}", flush=True)
+    print(f"[RAG DEBUG] project_id={project_id!r}, query={query!r}, chunks={len(chunks)}", flush=True)
     if not chunks:
         return ""
     result = "\n\n".join(c["content"] for c in chunks)
@@ -465,6 +470,7 @@ async def _compare_handler(request: dict) -> dict:
 async def chat_completions(request: dict):
     """OpenAI 호환 채팅 엔드포인트."""
     # Compare 모드 — 두 번 처리해서 묶어 반환
+    logger.info("request : %s", request)
     if _strip_compare_mode(request):
         return await _compare_handler(request)
 

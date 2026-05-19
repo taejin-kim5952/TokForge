@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
-**LLM 호출을 자동으로 최적화하는 로컬 미들웨어.**
+**LLM 호출을 자동으로 최적화하는 미들웨어.**
 AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·검색·압축·라우팅 파이프라인을 거치게 합니다.
 프로젝트별로 따로 튜닝 가능하며, 결과 답변 품질과 토큰 효율을 동시에 끌어올립니다.
 
