@@ -470,7 +470,6 @@ async def _compare_handler(request: dict) -> dict:
 async def chat_completions(request: dict):
     """OpenAI 호환 채팅 엔드포인트."""
     # Compare 모드 — 두 번 처리해서 묶어 반환
-    logger.info("request : %s", request)
     if _strip_compare_mode(request):
         return await _compare_handler(request)
 
