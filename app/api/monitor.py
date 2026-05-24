@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 
 from app.services.monitor import get_monitor
 
-router = APIRouter()
+router = APIRouter(tags=["monitor"])
 
 
 @router.get("/monitor/recent")

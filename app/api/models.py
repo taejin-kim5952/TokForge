@@ -3,27 +3,39 @@
 from fastapi import APIRouter
 import httpx
 
-from app.config import OLLAMA_BASE_URL, DEFAULT_MODEL
+from app.config import OLLAMA_BASE_URL, DEFAULT_MODEL, AZURE_OPENAI_MODEL
 
-router = APIRouter()
+router = APIRouter(tags=["models"])
 
 
 @router.get("/v1/models")
 async def list_models():
     """OpenAI 호환 모델 목록 (Continue.dev 자동 감지용)."""
+    models = []
+
+    # 1) Azure DeepSeek 먼저 넣기 (설정돼 있을 때만)
+    if AZURE_OPENAI_MODEL:
+        models.append({
+            "id": AZURE_OPENAI_MODEL,
+            "object": "model",
+            "owned_by": "azure",
+        })
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
             data = r.json()
-        return {
-            "object": "list",
-            "data": [
-                {"id": m["name"], "object": "model", "owned_by": "ollama"}
-                for m in data.get("models", [])
-            ],
-        }
+
+        for m in data.get("models", []):
+            models.append({
+                "id": m["name"],
+                "object": "model",
+                "owned_by": "ollama",
+            })
     except Exception:
-        return {"object": "list", "data": []}
+        pass
+
+    return {"object": "list", "data": models}
 
 
 @router.get("/v1/models/current")

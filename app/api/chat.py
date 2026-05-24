@@ -17,6 +17,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.config import (
+    AZURE_OPENAI_MODEL,
     COMPRESSOR_MODEL,
     ENABLE_CONTEXT_COMPRESSION,
     ENABLE_MODEL_ROUTING,
@@ -37,14 +38,14 @@ from app.services.compressor import get_compressor
 from app.services.monitor import get_monitor, now_ms
 from app.services.pricing import baseline_cost, estimate_cost
 from app.services.prompt import get_template_service
-from app.services.rag import get_rag
+from app.services.rag_context import search_rag_context
 from app.services.refiner import get_refiner
 from app.services.router import get_router as get_model_router
 
 logger = logging.getLogger(__name__)
 
 
-router = APIRouter()
+router = APIRouter(tags=["chat"])
 
 
 def _pipeline_enabled(request: dict, key: str, default_flag: bool) -> bool:
@@ -107,18 +108,10 @@ def _build_context(request: dict, query: str, metrics: dict) -> str:
         metrics["rag_chunks"] = 0
         return ""
     project_id: int | None = request.get("project_id")
-    store = get_rag(project_id)
-    # 프로젝트 전용 인덱스에 문서가 없으면 글로벌 인덱스로 폴백
-    if project_id is not None and store.store is None:
-        store = get_rag(None)
-    chunks = store.search(query, k=3)
-    metrics["rag_chunks"] = len(chunks)
-    print(f"[RAG DEBUG] project_id={project_id!r}, query={query!r}, chunks={len(chunks)}", flush=True)
-    if not chunks:
-        return ""
-    result = "\n\n".join(c["content"] for c in chunks)
-    metrics["ctx_before"] = len(result)
-    print(f"[RAG DEBUG] context length={len(result)}", flush=True)
+    chunk_count, result = search_rag_context(query, project_id=project_id, k=3)
+    metrics["rag_chunks"] = chunk_count
+    if result:
+        metrics["ctx_before"] = len(result)
     return result
 
 
@@ -154,6 +147,11 @@ async def _select_model(query: str | None, request: dict, metrics: dict) -> None
     logger.info("query : %s", query)
     logger.info("request : %s", request)
     logger.info("metrics : %s", metrics)
+    user_model = request.get("model")
+    if user_model and AZURE_OPENAI_MODEL and user_model == AZURE_OPENAI_MODEL:
+        metrics["tier"] = "cloud"
+        metrics["model"] = user_model
+        return
     if not _pipeline_enabled(request, "route", ENABLE_MODEL_ROUTING):
         metrics["tier"] = None
         metrics["model"] = None

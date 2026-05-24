@@ -25,5 +25,10 @@ python-dotenv>=1.0
 authlib>=1.3
 itsdangerous>=2.2
 
-# Excel 파일 처리 (WBS 양식 채우기)
+# Excel 파일 처리 (WBS 양식 채우기) + RAG xlsx 추출
 openpyxl>=3.1
+
+# RAG 문서 텍스트 추출 (PDF / Word / PowerPoint)
+pypdf>=4.0
+python-docx>=1.1
+python-pptx>=1.0

@@ -13,6 +13,11 @@ load_dotenv()
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/v1/chat/completions"
 
+# Azure OpenAI 연결 정보
+AZURE_OPENAI_BASE_URL = os.environ.get("AZURE_OPENAI_BASE_URL", "")
+AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY", "")
+AZURE_OPENAI_MODEL = os.environ.get("AZURE_OPENAI_MODEL", "")
+
 
 # Step 9 — Langfuse 관찰성
 LANGFUSE_ENABLED = os.environ.get("LANGFUSE_ENABLED", "false").lower() == "true"
@@ -38,6 +43,9 @@ REFINER_MODEL = _GEMMA3_TINY
 # Step 6 — 컨텍스트 압축 (RAG 결과를 LLM 으로 핵심만 추출)
 ENABLE_CONTEXT_COMPRESSION = True
 COMPRESSOR_MODEL = _GEMMA4_LARGE
+
+# 프로젝트 개요 정리(organize) 전용 모델 — 구조화 안정성 위해 큰 모델 권장
+OVERVIEW_ORGANIZER_MODEL = os.environ.get("OVERVIEW_ORGANIZER_MODEL", _GEMMA4_LARGE)
 
 # Step 7 — 모델 자동 라우팅 (질문 복잡도에 따라 답변 모델 선택)
 ENABLE_MODEL_ROUTING = True

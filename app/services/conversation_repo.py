@@ -11,6 +11,10 @@ from app import db
 
 logger = logging.getLogger(__name__)
 
+MENU_TOKFORGE = "tokforge"
+MENU_OVERVIEW = "overview"
+MENU_REQUIREMENTS = "requirements"
+
 
 def _now() -> str:
     return datetime.utcnow().isoformat()
@@ -23,6 +27,7 @@ def init_schema() -> None:
                 id              TEXT PRIMARY KEY,
                 owner_user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 project_id      INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                menu_key        TEXT NOT NULL DEFAULT 'tokforge',
                 title           TEXT NOT NULL,
                 created_at      TEXT NOT NULL,
                 updated_at      TEXT NOT NULL
@@ -31,6 +36,52 @@ def init_schema() -> None:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_conversations_owner_updated
             ON conversations(owner_user_id, updated_at DESC)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversations_owner_project_updated
+            ON conversations(owner_user_id, project_id, updated_at DESC)
+        """)
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(conversations)").fetchall()
+        }
+        if "menu_key" not in cols:
+            conn.execute(
+                "ALTER TABLE conversations ADD COLUMN menu_key TEXT NOT NULL DEFAULT 'tokforge'"
+            )
+            conn.execute(
+                """
+                UPDATE conversations SET menu_key = ?
+                WHERE EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.conversation_id = conversations.id
+                      AND m.meta_json LIKE '%"type": "organize"%'
+                )
+                """,
+                (MENU_OVERVIEW,),
+            )
+            conn.execute(
+                """
+                UPDATE conversations SET menu_key = ?
+                WHERE project_id IS NOT NULL
+                  AND menu_key = ?
+                  AND EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.conversation_id = conversations.id
+                      AND m.meta_json LIKE '%"type": "chat"%'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.conversation_id = conversations.id
+                      AND (m.meta_json LIKE '%"trace"%'
+                           OR m.meta_json LIKE '%"usage"%')
+                  )
+                """,
+                (MENU_OVERVIEW, MENU_TOKFORGE),
+            )
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversations_owner_project_menu_updated
+            ON conversations(owner_user_id, project_id, menu_key, updated_at DESC)
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
@@ -72,6 +123,7 @@ def create(
     *,
     conversation_id: str | None = None,
     project_id: int | None = None,
+    menu_key: str = MENU_TOKFORGE,
 ) -> dict:
     cid = conversation_id or str(uuid.uuid4())
     title = title.strip() or "New chat"
@@ -88,10 +140,12 @@ def create(
                 raise ValueError("project not found")
         conn.execute(
             """
-            INSERT INTO conversations (id, owner_user_id, project_id, title, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO conversations (
+                id, owner_user_id, project_id, menu_key, title, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (cid, owner_user_id, project_id, title, now, now),
+            (cid, owner_user_id, project_id, menu_key, title, now, now),
         )
         conn.commit()
     return get_owned(cid, owner_user_id)  # type: ignore[return-value]
@@ -100,8 +154,8 @@ def create(
 def get_owned(conversation_id: str, owner_user_id: int) -> dict | None:
     with db.connection() as conn:
         row = conn.execute(
-            "SELECT id, project_id, title, created_at, updated_at FROM conversations "
-            "WHERE id = ? AND owner_user_id = ?",
+            "SELECT id, project_id, menu_key, title, created_at, updated_at "
+            "FROM conversations WHERE id = ? AND owner_user_id = ?",
             (conversation_id, owner_user_id),
         ).fetchone()
         if not row:
@@ -169,6 +223,106 @@ def append_message(
             (mid,),
         ).fetchone()
         return _row_to_message(dict(row))
+
+
+def update_content(
+    message_id: str,
+    owner_user_id: int,
+    content: str,
+) -> dict | None:
+    """assistant 메시지의 content 를 업데이트 (스트리밍 종료 시점에 호출).
+
+    소유권은 JOIN 으로 검증 — 다른 사용자의 메시지는 절대 갱신 못 함.
+    """
+    now = _now()
+    with db.connection() as conn:
+        msg = conn.execute(
+            """
+            SELECT m.id FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.id = ? AND c.owner_user_id = ?
+            """,
+            (message_id, owner_user_id),
+        ).fetchone()
+        if not msg:
+            return None
+        conn.execute(
+            "UPDATE messages SET content = ? WHERE id = ?",
+            (content, message_id),
+        )
+        conn.execute(
+            """
+            UPDATE conversations SET updated_at = ?
+            WHERE id = (SELECT conversation_id FROM messages WHERE id = ?)
+            """,
+            (now, message_id),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id, role, content, reasoning, meta_json, rating, rated_at, created_at, seq "
+            "FROM messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        return _row_to_message(dict(row)) if row else None
+
+
+def delete_if_empty_assistant(message_id: str, owner_user_id: int) -> bool:
+    """빈 assistant 메시지면 삭제 (스트림 중단 등으로 content 가 비어있는 경우)."""
+    with db.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT m.id, m.content, m.role FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.id = ? AND c.owner_user_id = ?
+            """,
+            (message_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            return False
+        if row["role"] != "assistant" or (row["content"] or "").strip():
+            return False
+        conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        conn.commit()
+        return True
+
+
+def list_by_project(
+    owner_user_id: int,
+    project_id: int,
+    *,
+    menu_key: str,
+    limit: int = 50,
+) -> list[dict]:
+    """프로젝트·메뉴(overview 등)별 대화 목록 + 메시지 수 + has_organize 집계."""
+    with db.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                c.id, c.title, c.created_at, c.updated_at,
+                (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+                EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.conversation_id = c.id
+                      AND m.meta_json LIKE '%"type": "organize"%'
+                ) AS has_organize
+            FROM conversations c
+            WHERE c.owner_user_id = ? AND c.project_id = ? AND c.menu_key = ?
+            ORDER BY c.updated_at DESC
+            LIMIT ?
+            """,
+            (owner_user_id, project_id, menu_key, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "message_count": r["message_count"],
+                "has_organize": bool(r["has_organize"]),
+            }
+            for r in rows
+        ]
 
 
 def set_rating(

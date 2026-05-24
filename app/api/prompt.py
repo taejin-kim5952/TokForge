@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query
 from app.services.prompt import get_template_service
 from app.services.rag import get_rag
 
-router = APIRouter()
+router = APIRouter(tags=["prompt"])
 
 
 @router.get("/prompt/preview")

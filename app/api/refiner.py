@@ -10,7 +10,7 @@ from fastapi import APIRouter, Query
 
 from app.services.refiner import get_refiner
 
-router = APIRouter()
+router = APIRouter(tags=["pipeline"])
 
 
 @router.get("/refiner/refine")

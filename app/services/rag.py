@@ -193,3 +193,9 @@ def get_rag(project_id: int | None = None) -> RAGStore:
 def invalidate_rag(project_id: int | None = None) -> None:
     """업로드/삭제 후 싱글톤을 무효화해 다음 요청 시 재로드."""
     _registry.pop(project_id, None)
+
+
+def ingest_text_document(project_id: int | None, filename: str, text: str) -> int:
+    """텍스트 문서를 청킹·인덱싱. 업로드/삭제 직전 invalidate_rag 호출 권장."""
+    invalidate_rag(project_id)
+    return get_rag(project_id).add_document(filename, text)

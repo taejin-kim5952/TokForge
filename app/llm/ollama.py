@@ -6,13 +6,25 @@ request["model"] 이 이미 지정돼 있으면 그대로 사용 (Step 7 라우�
 
 import httpx
 
-from app.config import OLLAMA_CHAT_URL, DEFAULT_MODEL
-
+from app.config import (
+    OLLAMA_CHAT_URL, 
+    DEFAULT_MODEL,
+    AZURE_OPENAI_MODEL,
+    AZURE_OPENAI_BASE_URL,
+    AZURE_OPENAI_API_KEY,
+)
 
 def _ensure_model(request: dict) -> None:
     """request 에 model 이 없으면 DEFAULT_MODEL 설정."""
     if not request.get("model"):
         request["model"] = DEFAULT_MODEL
+
+
+def _is_azure_model(model: str) -> bool:
+    """model 이 Azure OpenAI 모델인지 확인."""
+    if not AZURE_OPENAI_MODEL or not AZURE_OPENAI_BASE_URL or not AZURE_OPENAI_API_KEY:
+        return False
+    return model == AZURE_OPENAI_MODEL
 
 
 def _convert_images_to_vision_format(request: dict) -> None:
@@ -50,7 +62,14 @@ async def chat_completion(request: dict) -> dict:
     _ensure_model(request)
     _convert_images_to_vision_format(request)
     async with httpx.AsyncClient(timeout=300.0) as client:
-        response = await client.post(OLLAMA_CHAT_URL, json=request)
+        if _is_azure_model(request.get("model", "")):
+            response = await client.post(
+                AZURE_OPENAI_BASE_URL,
+                json=request,
+                headers={"api-key": AZURE_OPENAI_API_KEY},
+            )
+        else:
+            response = await client.post(OLLAMA_CHAT_URL, json=request)
         return response.json()
 
 
@@ -59,7 +78,18 @@ async def chat_completion_stream(request: dict):
     _ensure_model(request)
     _convert_images_to_vision_format(request)
     async with httpx.AsyncClient(timeout=300.0) as client:
-        async with client.stream("POST", OLLAMA_CHAT_URL, json=request) as response:
-            async for line in response.aiter_lines():
-                if line:
-                    yield f"{line}\n\n"
+        if _is_azure_model(request.get("model", "")):
+            async with client.stream(
+                "POST",
+                AZURE_OPENAI_BASE_URL,
+                json=request,
+                headers={"api-key": AZURE_OPENAI_API_KEY},
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line:
+                        yield f"{line}\n\n"
+        else:
+            async with client.stream("POST", OLLAMA_CHAT_URL, json=request) as response:
+                async for line in response.aiter_lines():
+                    if line:
+                        yield f"{line}\n\n"

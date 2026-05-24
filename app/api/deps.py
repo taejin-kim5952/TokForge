@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import Cookie, Depends, HTTPException
 
 from app.config import DEV_USER_ID, ENV, SESSION_COOKIE_NAME
-from app.services import session_repo, user_repo
+from app.services import project_repo, session_repo, user_repo
 
 logger = logging.getLogger(__name__)
 
@@ -50,3 +50,14 @@ def get_current_user(
 
 # 사용 예: def my_endpoint(user: CurrentUser): ...
 CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+
+def get_owned_project(project_id: int, user: CurrentUser) -> dict:
+    """project_id가 현재 유저 소유인지 확인. 아니면 404."""
+    project = project_repo.get_owned(project_id, user["id"])
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return project
+
+
+OwnedProject = Annotated[dict, Depends(get_owned_project)]

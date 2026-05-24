@@ -34,12 +34,13 @@ from app.config import (
 from app import db
 from app.services import conversation_repo, prompt_repo
 from app.services.monitor import get_monitor
-from app.services.rag import get_rag, invalidate_rag
+from app.services.rag import get_rag, ingest_text_document, invalidate_rag
+from app.services.rag_document_extract import extract_text_from_document
 from app.services import project_repo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin")
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.get("/status")
@@ -160,12 +161,12 @@ def list_all_conversations(
         params.extend([limit, offset])
         rows = conn.execute(query, params).fetchall()
         total_row = conn.execute(
-            "SELECT COUNT(*) FROM conversations" +
+            "SELECT COUNT(*) AS count FROM conversations" +
             (" WHERE project_id = ?" if project_id is not None else ""),
             ([project_id] if project_id is not None else []),
         ).fetchone()
         return {
-            "total": total_row[0],
+            "total": total_row["count"],
             "conversations": [dict(r) for r in rows],
         }
 
@@ -234,9 +235,6 @@ def list_all_projects() -> dict:
 # Admin RAG 관리 (프로젝트별)
 # ─────────────────────────────────────────────
 
-RAG_ALLOWED_EXTENSIONS = {".txt", ".md"}
-
-
 @router.get("/rag/sources")
 def rag_list_sources(project_id: int | None = None) -> dict:
     """프로젝트(또는 글로벌)의 업로드된 문서 목록 반환."""
@@ -250,25 +248,14 @@ async def rag_upload(
     file: UploadFile = File(...),
     project_id: int | None = None,
 ) -> dict:
-    """TXT/MD 파일을 지정 프로젝트 RAG 인덱스에 추가."""
-    suffix = ("." + file.filename.rsplit(".", 1)[-1].lower()) if "." in (file.filename or "") else ""
-    if suffix not in RAG_ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"지원 형식: {', '.join(RAG_ALLOWED_EXTENSIONS)} (받은 파일: {file.filename})",
-        )
-
+    """문서 파일을 지정 프로젝트 RAG 인덱스에 추가 (PDF/Office 포함)."""
     raw = await file.read()
     try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="UTF-8 인코딩 파일만 지원합니다")
+        text = extract_text_from_document(file.filename, raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="빈 파일입니다")
-
-    invalidate_rag(project_id)
-    chunk_count = get_rag(project_id).add_document(file.filename, text)
+    chunk_count = ingest_text_document(project_id, file.filename, text)
     return {
         "ok": True,
         "project_id": project_id,

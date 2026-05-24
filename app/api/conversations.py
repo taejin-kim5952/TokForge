@@ -13,6 +13,7 @@ class CreateConversationRequest(BaseModel):
     id: str | None = Field(None, max_length=64)
     title: str = Field("New chat", max_length=200)
     project_id: int | None = None
+    menu_key: str = Field("tokforge", max_length=64)
 
 
 class AppendMessageRequest(BaseModel):
@@ -31,8 +32,11 @@ class RatingRequest(BaseModel):
 def create_conversation(payload: CreateConversationRequest, user: CurrentUser) -> dict:
     try:
         return conversation_repo.create(
-            user["id"], payload.title,
-            conversation_id=payload.id, project_id=payload.project_id,
+            user["id"],
+            payload.title,
+            conversation_id=payload.id,
+            project_id=payload.project_id,
+            menu_key=payload.menu_key,
         )
     except ValueError as e:
         if "already exists" in str(e):

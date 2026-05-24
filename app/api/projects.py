@@ -10,12 +10,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser
-from app.services import project_repo
+from app.services import project_repo, rag_service
 from app.services.project_repo import DuplicateProjectName
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/projects")
+router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 class CreateProjectRequest(BaseModel):
@@ -46,4 +46,5 @@ def delete_project(project_id: int, user: CurrentUser) -> dict:
     ok = project_repo.delete_owned(project_id, user["id"])
     if not ok:
         raise HTTPException(404, "project not found")
+    rag_service.cleanup_project(project_id)
     return {"ok": True}

@@ -5,7 +5,7 @@ import httpx
 
 from app.config import OLLAMA_BASE_URL
 
-router = APIRouter()
+router = APIRouter(tags=["health"])
 
 @router.get("/")
 def root():

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from app.services.compressor import get_compressor
 from app.services.rag import get_rag
 
-router = APIRouter()
+router = APIRouter(tags=["pipeline"])
 
 
 @router.get("/compressor/compress")

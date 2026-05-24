@@ -11,7 +11,14 @@ from app import db
 
 logger = logging.getLogger(__name__)
 
-VALID_KINDS = ("refiner", "classifier", "compressor", "system")
+VALID_KINDS = (
+    "refiner",
+    "classifier",
+    "compressor",
+    "system",
+    "overview_organizer",
+    "requirements_organizer",
+)
 
 
 def init_schema() -> None:
@@ -36,34 +43,43 @@ def init_schema() -> None:
 
 
 def seed_if_empty() -> None:
-    """테이블이 비어있으면 현재 하드코딩된 4종 프롬프트를 v1으로 삽입."""
+    """비어있는 kind를 v1으로 시드. 기존 kind는 건드리지 않음 (멱등)."""
     from app.services.refiner import REFINER_TEMPLATE
     from app.services.router import CLASSIFIER_TEMPLATE
     from app.services.compressor import COMPRESSOR_TEMPLATE
     from app.services.prompt import SYSTEM_TEMPLATE
+    from app.api.project_ai.overview.prompts import OVERVIEW_ORGANIZER_PROMPT
+    from app.api.project_ai.requirements.prompts import REQUIREMENTS_ORGANIZER_PROMPT
 
     seeds = {
-        "refiner":    REFINER_TEMPLATE,
-        "classifier": CLASSIFIER_TEMPLATE,
-        "compressor": COMPRESSOR_TEMPLATE,
-        "system":     SYSTEM_TEMPLATE,
+        "refiner":                REFINER_TEMPLATE,
+        "classifier":             CLASSIFIER_TEMPLATE,
+        "compressor":             COMPRESSOR_TEMPLATE,
+        "system":                 SYSTEM_TEMPLATE,
+        "overview_organizer":     OVERVIEW_ORGANIZER_PROMPT,
+        "requirements_organizer": REQUIREMENTS_ORGANIZER_PROMPT,
     }
 
     with db.connection() as conn:
-        row = conn.execute("SELECT COUNT(*) FROM prompts").fetchone()
-        if row[0] > 0:
-            logger.info("prompts table already seeded (rows=%d) — skip", row[0])
-            return
-
         now = datetime.utcnow().isoformat()
+        seeded: list[str] = []
         for kind, body in seeds.items():
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM prompts WHERE kind = ?", (kind,),
+            ).fetchone()
+            if existing[0] > 0:
+                continue
             conn.execute(
                 "INSERT INTO prompts (kind, version, body, is_active, created_at, note) "
                 "VALUES (?, 1, ?, 1, ?, ?)",
                 (kind, body, now, "seeded from code constants"),
             )
+            seeded.append(kind)
         conn.commit()
-        logger.info("prompts seeded: %s", list(seeds.keys()))
+        if seeded:
+            logger.info("prompts seeded: %s", seeded)
+        else:
+            logger.info("prompts already seeded for all kinds — skip")
 
 
 def get_active(kind: str) -> str | None:

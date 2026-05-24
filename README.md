@@ -19,16 +19,16 @@ AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·�
 
 ---
 
-## 🔄 처리 파이프라인
+## 🔄 처리 파이프라인 (TokForgeAI)
 
 ```
-[사용자 질문]
+[사용자 질문]  (+ 선택: project_id)
    ↓
 1. 정제          gemma3:1b 로 오타·중복 제거, 의도 명확화
    ↓
 2. 의미 캐시     같은/비슷한 질문이면 즉시 응답 (API 호출 X)
    ↓
-3. RAG 검색      회사 가이드 / 문서 컨텍스트 자동 추가
+3. RAG 검색      프로젝트별 등록 문서에서 chunks 검색 (project_id 지정 시 해당 프로젝트만)
    ↓
 4. 압축          핵심만 남기고 토큰 줄이기
    ↓
@@ -36,14 +36,43 @@ AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·�
    ↓
 6. 모델 라우팅   복잡도 따라 답변 모델 자동 선택 (simple/medium/complex)
    ↓
-7. Ollama 호출
+7. Ollama / Azure OpenAI 호출
    ↓
 8. 응답 + 모니터링 기록 (토큰·비용·지연시간 누적)
    ↓
 [사용자]
 ```
 
-각 단계의 프롬프트는 **DB에 버전 저장 + Admin UI에서 재기동 없이 교체** 가능.
+- `project_id`가 있으면 **해당 프로젝트 RAG 인덱스만** 사용 (글로벌·다른 프로젝트 문서로 폴백하지 않음).
+- 각 단계의 프롬프트는 **DB에 버전 저장 + Admin UI에서 재기동 없이 교체** 가능.
+
+---
+
+## 📂 프로젝트 기능 (웹 UI)
+
+프론트 [`TokForge.io`](../TokForge.io) — `/projects/:projectId` **ProjectBoard**
+
+| 메뉴 | 기능 |
+|------|------|
+| **프로젝트 개요** | 9개 필드 직접 편집 + 「지금 저장」 / AI 채팅 / 대화 목록 / 내용정리 |
+| **RAG 문서** | PDF·Word·PPT·Excel·텍스트 업로드, 목록, 다운로드, 삭제 |
+| **WBS** | 이슈 보드 (상태별 필터) |
+| 기타 메뉴 | 요구사항·기능정의 등 (폼 placeholder, 준비 중) |
+
+### RAG 문서 (프로젝트별)
+
+- **저장**: DB `project_rag_files` + 원본 `storage/rag_files/project_{id}/` + 벡터 `storage/rag_index/project_{id}/`
+- **지원 형식**: `.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.xlsm`
+- **API**: `GET/POST/DELETE /projects/{id}/rag/files`, `GET .../download`
+- **채팅 연동**: TokForgeAI(`project_id`) + 프로젝트 개요 AI — 공통 [`rag_context.py`](app/services/rag_context.py)
+
+### 프로젝트 개요
+
+- **문서**: `GET/PUT /projects/{id}/overview` → `project_documents` (JSON)
+- **AI**: `POST /projects/{id}/ai/overview` — Ollama 또는 Azure(DeepSeek), RAG + 폼 컨텍스트 주입
+- **수동 편집**: 자동 저장 없음 — 사용자가 「지금 저장」 클릭
+
+상세: [개발내용/13-project-rag-overview.md](../개발내용/13-project-rag-overview.md)
 
 ---
 
@@ -64,16 +93,17 @@ AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·�
 | 9 | 관찰성 (Langfuse) | ✅ 완료 (선택) | Langfuse trace (`LANGFUSE_ENABLED`) |
 
 > **설계 원칙**: Step 1~2 는 학습 목적의 직접 구현, Step 3 부터는 LangChain 도입.
-> Step 1~2 의 직접 구현은 임베딩·FAISS·코사인 유사도 원리를 손에 익히는 학습 자산으로 보존.
 
-### 운영 인프라
+### 운영·프로젝트 기능
 
 | 영역 | 상태 | 구현 |
 |---|---|---|
 | 프롬프트 버전 관리 | ✅ 완료 | SQLite + Admin UI (4종 × N 버전, 무재기동 교체) |
 | Google OAuth 로그인 | ✅ 완료 | Authlib + PKCE + 불투명 세션 토큰 |
 | 사용자별 프로젝트 CRUD | ✅ 완료 | SQL `owner_user_id` 격리 보장 |
-| Admin Dashboard | ✅ 완료 | Ollama 상태 / 모델 사용 / 단계별 메트릭 / 프롬프트 편집 |
+| **프로젝트 RAG 문서** | ✅ 완료 | 업로드·목록·다운로드·프로젝트별 FAISS 격리 |
+| **프로젝트 개요 (폼+AI)** | ✅ 완료 | 9필드 수동 저장 + AI 채팅 + RAG 연동 |
+| Admin Dashboard | ✅ 완료 | Ollama 상태 / 메트릭 / 프롬프트·RAG 관리 |
 | 채팅 스트리밍 (SSE) | ✅ 완료 | OpenAI 호환 + 커스텀 pipeline 이벤트 |
 | `/admin` 인증 보호 | ⏳ 미완 | 현재 public — 운영 진입 전 필수 |
 | 프로젝트별 prompt 격리 | ⏳ 다음 | `prompts.project_id` 컬럼 추가 예정 |
@@ -93,11 +123,19 @@ python -m pip install --no-cache-dir -r requirements.txt
 Copy-Item .env.example .env
 # 편집기로 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 등 채우기
 
-# 기동
+# 기동 (document_repo, rag_file_repo 스키마 자동 생성)
 python -m uvicorn main:app --reload --port 8000
 ```
 
-→ http://localhost:8000/docs (Swagger UI)
+프론트 (별도 터미널):
+
+```powershell
+cd ..\TokForge.io
+npm install
+npm run dev
+```
+
+→ API: http://localhost:8000/docs · UI: http://localhost:5173
 
 상세 셋업: [개발내용/01-quick-start.md](../개발내용/01-quick-start.md)
 
@@ -110,29 +148,39 @@ TokForge/
 ├── main.py                    ← FastAPI 진입점
 ├── app/
 │   ├── config.py              ← 모든 설정 + .env 로드
-│   ├── db.py                  ← SQLite 공통 connection (PRAGMA foreign_keys=ON)
-│   ├── api/                   ← HTTP 라우터
-│   │   ├── auth.py            ← OAuth (Google) + /me + /logout
-│   │   ├── projects.py        ← 사용자 프로젝트 CRUD
-│   │   ├── admin.py           ← /admin/status, /admin/prompts/*
-│   │   ├── chat.py            ← /v1/chat/completions (8단계 오케스트레이션)
-│   │   ├── deps.py            ← CurrentUser dependency
-│   │   └── health, cache, rag, prompt, refiner, compressor, router, models, monitor
-│   ├── services/              ← Repository + 비즈니스 로직
+│   ├── db.py                  ← SQLite 공통 connection
+│   ├── api/
+│   │   ├── auth.py            ← OAuth + /me
+│   │   ├── projects.py        ← 프로젝트 CRUD
+│   │   ├── project_rag.py     ← 프로젝트 RAG 파일 API
+│   │   ├── project_ai/        ← 개요·대화·organize
+│   │   ├── admin.py           ← /admin/status, prompts, RAG
+│   │   ├── chat.py            ← /v1/chat/completions (8단계)
+│   │   ├── conversations.py   ← TokForgeAI 대화
+│   │   └── deps.py            ← CurrentUser, OwnedProject
+│   ├── services/
 │   │   ├── user_repo.py, session_repo.py, project_repo.py
-│   │   ├── prompt_repo.py     ← 프롬프트 버전 관리
-│   │   ├── refiner.py, compressor.py, router.py, prompt.py
-│   │   ├── cache.py, rag.py, monitor.py, pricing.py
-│   ├── llm/ollama.py          ← Ollama 클라이언트
-│   └── observability/langfuse_client.py
+│   │   ├── document_repo.py   ← project_documents (개요 등)
+│   │   ├── rag_file_repo.py   ← project_rag_files 메타
+│   │   ├── rag_service.py     ← 업로드·삭제·원본 저장
+│   │   ├── rag_document_extract.py  ← PDF/Office 텍스트 추출
+│   │   ├── rag_context.py     ← RAG 검색 (TokForgeAI + 개요 AI)
+│   │   ├── conversation_repo.py
+│   │   ├── prompt_repo.py, refiner.py, compressor.py, router.py
+│   │   ├── cache.py, rag.py, monitor.py
+│   └── llm/ollama.py          ← Ollama + Azure OpenAI
 ├── storage/
-│   └── monitor.db             ← 모든 SQLite 데이터 (users, sessions, projects, prompts, requests)
+│   ├── monitor.db             ← SQLite (users, projects, documents, rag_files, …)
+│   ├── rag_files/             ← RAG 원본 파일
+│   └── rag_index/             ← FAISS 인덱스 (global, project_{id})
 ├── docs/                      ← 단계별 학습 노트
 ├── .env / .env.example
-└── requirements.txt
+└── requirements.txt           ← pypdf, python-docx, python-pptx, openpyxl 포함
 ```
 
-자세한 모듈별 역할: [개발내용/03-backend.md](../개발내용/03-backend.md)
+DDL 참고: [`../테이블스크립트.txt`](../테이블스크립트.txt)
+
+자세한 모듈별 역할: [개발내용/03-backend.md](../개발내용/03-backend.md) · [13-project-rag-overview.md](../개발내용/13-project-rag-overview.md)
 
 ---
 
@@ -169,6 +217,7 @@ TokForge/
 
 ### 📖 인수인계 / 운영 가이드
 - 🤝 [개발 인수인계 문서 모음](../개발내용/README.md) — 백엔드/프론트/배포/트러블슈팅 상세
+- 📎 [13. 프로젝트 RAG + 개요](../개발내용/13-project-rag-overview.md) — 최신 기능 (2026-05-24)
 
 ---
 

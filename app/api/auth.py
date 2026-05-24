@@ -36,7 +36,7 @@ from app.services import session_repo, user_repo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["auth"])
 
 # Google OAuth 표준 endpoint들 (변하지 않는 상수)
 _GOOGLE_AUTH_URL  = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -45,20 +45,6 @@ _GOOGLE_JWKS_URL  = "https://www.googleapis.com/oauth2/v3/certs"
 
 # OAuth state TTL — 사용자가 Google 화면에서 시간 끌어도 10분 안에 돌아오면 OK
 _STATE_TTL = timedelta(minutes=10)
-
-
-def init_schema() -> None:
-    """oauth_states 테이블 생성 (PKCE verifier + CSRF state, 단명)."""
-    with db.connection() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS oauth_states (
-                state          TEXT PRIMARY KEY,
-                code_verifier  TEXT NOT NULL,
-                return_to      TEXT,
-                created_at     TEXT NOT NULL
-            )
-        """)
-        conn.commit()
 
 
 # ────────────── /me, /logout ──────────────

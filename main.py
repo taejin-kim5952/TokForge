@@ -21,8 +21,17 @@ from app.api import (
     refiner,
     router as router_api,
     wbs,
+    project_ai,
+    project_rag,
 )
-from app.services import conversation_repo, project_repo, prompt_repo, session_repo, user_repo
+
+from app.services import (
+    document_repo,
+    project_requirements_repo,
+    prompt_repo,
+    rag_file_repo,
+)
+
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -37,12 +46,9 @@ app = FastAPI(
 )
 
 
-user_repo.init_schema()
-session_repo.init_schema()
-project_repo.init_schema()
-conversation_repo.init_schema()
-auth.init_schema()
-prompt_repo.init_schema()
+document_repo.init_schema()
+rag_file_repo.init_schema()
+project_requirements_repo.init_schema()
 prompt_repo.seed_if_empty()
 
 
@@ -57,6 +63,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Conversation-Id", "X-Assistant-Message-Id"],
 )
 
 
@@ -74,5 +81,7 @@ app.include_router(monitor.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(projects.router)
+app.include_router(project_rag.router)
 app.include_router(conversations.router)
 app.include_router(wbs.router)
+app.include_router(project_ai.router)
