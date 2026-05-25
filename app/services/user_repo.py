@@ -6,6 +6,8 @@
 import logging
 from datetime import datetime
 
+import psycopg2
+
 from app import db
 
 logger = logging.getLogger(__name__)
@@ -16,10 +18,10 @@ def init_schema() -> None:
     with db.connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                id              BIGSERIAL PRIMARY KEY,
                 google_sub      TEXT    NOT NULL UNIQUE,
                 email           TEXT    NOT NULL,
-                email_verified  INTEGER NOT NULL DEFAULT 0,
+                email_verified  BOOLEAN NOT NULL DEFAULT FALSE,
                 name            TEXT,
                 picture_url     TEXT,
                 created_at      TEXT    NOT NULL,
@@ -29,7 +31,6 @@ def init_schema() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)"
         )
-        conn.commit()
 
 
 def get_by_id(user_id: int) -> dict | None:
@@ -79,21 +80,19 @@ def upsert_from_google(
                 "UPDATE users SET email = ?, email_verified = ?, name = ?, "
                 "picture_url = ?, last_login_at = ? "
                 "WHERE google_sub = ?",
-                (email, int(email_verified), name, picture_url, now, google_sub),
+                (email, bool(email_verified), name, picture_url, now, google_sub),
             )
             user_id = existing["id"]
             logger.info("user updated: id=%d google_sub=%s", user_id, google_sub)
         else:
-            cursor = conn.execute(
+            row = conn.execute(
                 "INSERT INTO users (google_sub, email, email_verified, name, "
                 "picture_url, created_at, last_login_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (google_sub, email, int(email_verified), name, picture_url, now, now),
-            )
-            user_id = cursor.lastrowid
+                "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (google_sub, email, bool(email_verified), name, picture_url, now, now),
+            ).fetchone()
+            user_id = row["id"]
             logger.info("user created: id=%d email=%s", user_id, email)
-
-        conn.commit()
 
     result = get_by_id(user_id)
     if result is None:

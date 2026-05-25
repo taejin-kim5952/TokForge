@@ -22,15 +22,12 @@ from app.api import (
     router as router_api,
     wbs,
     project_ai,
+    project_admin,
     project_rag,
 )
 
-from app.services import (
-    document_repo,
-    project_requirements_repo,
-    prompt_repo,
-    rag_file_repo,
-)
+from app import db
+from app.services import prompt_repo
 
 
 logging.basicConfig(
@@ -46,9 +43,7 @@ app = FastAPI(
 )
 
 
-document_repo.init_schema()
-rag_file_repo.init_schema()
-project_requirements_repo.init_schema()
+db.init_all_schemas()
 prompt_repo.seed_if_empty()
 
 
@@ -81,6 +76,7 @@ app.include_router(monitor.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(projects.router)
+app.include_router(project_admin.router)
 app.include_router(project_rag.router)
 app.include_router(conversations.router)
 app.include_router(wbs.router)

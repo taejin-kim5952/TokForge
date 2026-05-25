@@ -32,3 +32,6 @@ openpyxl>=3.1
 pypdf>=4.0
 python-docx>=1.1
 python-pptx>=1.0
+
+# PostgreSQL (prompt_repo)
+psycopg2-binary>=2.9

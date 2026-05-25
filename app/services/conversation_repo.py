@@ -25,8 +25,8 @@ def init_schema() -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id              TEXT PRIMARY KEY,
-                owner_user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                project_id      INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                owner_user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_id      BIGINT REFERENCES projects(id) ON DELETE SET NULL,
                 menu_key        TEXT NOT NULL DEFAULT 'tokforge',
                 title           TEXT NOT NULL,
                 created_at      TEXT NOT NULL,
@@ -41,11 +41,14 @@ def init_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_conversations_owner_project_updated
             ON conversations(owner_user_id, project_id, updated_at DESC)
         """)
-        cols = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(conversations)").fetchall()
-        }
-        if "menu_key" not in cols:
+        col = conn.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'conversations'
+              AND column_name = 'menu_key'
+            """
+        ).fetchone()
+        if not col:
             conn.execute(
                 "ALTER TABLE conversations ADD COLUMN menu_key TEXT NOT NULL DEFAULT 'tokforge'"
             )
@@ -101,7 +104,6 @@ def init_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_messages_conversation_seq
             ON messages(conversation_id, seq)
         """)
-        conn.commit()
 
 
 def _row_to_message(row: dict) -> dict:
@@ -147,7 +149,6 @@ def create(
             """,
             (cid, owner_user_id, project_id, menu_key, title, now, now),
         )
-        conn.commit()
     return get_owned(cid, owner_user_id)  # type: ignore[return-value]
 
 
@@ -200,12 +201,12 @@ def append_message(
                 (mid,),
             ).fetchone()
             return _row_to_message(dict(row)) if row else None
-        seq = int(
-            conn.execute(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE conversation_id = ?",
-                (conversation_id,),
-            ).fetchone()[0]
-        )
+        seq_row = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq "
+            "FROM messages WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        seq = int(seq_row["next_seq"])
         conn.execute(
             """
             INSERT INTO messages (
@@ -216,7 +217,6 @@ def append_message(
             (mid, conversation_id, role, content, reasoning, meta_json, now, seq),
         )
         conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
-        conn.commit()
         row = conn.execute(
             "SELECT id, role, content, reasoning, meta_json, rating, rated_at, created_at, seq "
             "FROM messages WHERE id = ?",
@@ -257,7 +257,6 @@ def update_content(
             """,
             (now, message_id),
         )
-        conn.commit()
         row = conn.execute(
             "SELECT id, role, content, reasoning, meta_json, rating, rated_at, created_at, seq "
             "FROM messages WHERE id = ?",
@@ -282,7 +281,6 @@ def delete_if_empty_assistant(message_id: str, owner_user_id: int) -> bool:
         if row["role"] != "assistant" or (row["content"] or "").strip():
             return False
         conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
-        conn.commit()
         return True
 
 
@@ -352,7 +350,6 @@ def set_rating(
             (rating, now if rating is not None else None, message_id),
         )
         conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
-        conn.commit()
         row = conn.execute(
             "SELECT id, role, content, reasoning, meta_json, rating, rated_at, created_at, seq "
             "FROM messages WHERE id = ?",

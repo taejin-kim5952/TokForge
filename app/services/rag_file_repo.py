@@ -1,8 +1,9 @@
-"""프로젝트 RAG 원본 파일 메타데이터 — SQLite."""
+"""프로젝트 RAG 원본 파일 메타데이터 — PostgreSQL."""
 
 import logging
-import sqlite3
 from datetime import datetime
+
+import psycopg2
 
 from app import db
 
@@ -17,13 +18,13 @@ def init_schema() -> None:
     with db.connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS project_rag_files (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id      INTEGER NOT NULL,
+                id              BIGSERIAL PRIMARY KEY,
+                project_id      BIGINT NOT NULL,
                 filename        TEXT    NOT NULL,
                 storage_path    TEXT    NOT NULL,
-                size_bytes      INTEGER NOT NULL,
+                size_bytes      BIGINT NOT NULL,
                 chunk_count     INTEGER NOT NULL DEFAULT 0,
-                created_by      INTEGER,
+                created_by      BIGINT,
                 created_at      TEXT    NOT NULL,
                 UNIQUE (project_id, filename),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -34,7 +35,6 @@ def init_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_rag_files_project "
             "ON project_rag_files(project_id)"
         )
-        conn.commit()
 
 
 def list_for_project(project_id: int) -> list[dict]:
@@ -79,26 +79,25 @@ def create(
     now = datetime.utcnow().isoformat()
     with db.connection() as conn:
         try:
-            cursor = conn.execute(
+            row = conn.execute(
                 "INSERT INTO project_rag_files "
                 "(project_id, filename, storage_path, size_bytes, chunk_count, "
-                "created_by, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+                "created_by, created_at) VALUES (?, ?, ?, ?, 0, ?, ?) RETURNING id",
                 (project_id, filename, storage_path, size_bytes, created_by, now),
-            )
-            conn.commit()
-        except sqlite3.IntegrityError as e:
-            if "UNIQUE" in str(e):
-                raise DuplicateRagFilename(f"file '{filename}' already exists")
+            ).fetchone()
+        except psycopg2.IntegrityError as e:
+            if getattr(e, "pgcode", None) == "23505" or "unique" in str(e).lower():
+                raise DuplicateRagFilename(f"file '{filename}' already exists") from e
             raise
 
-        file_id = cursor.lastrowid
-        row = conn.execute(
+        file_id = row["id"]
+        out = conn.execute(
             "SELECT id, project_id, filename, storage_path, size_bytes, "
             "chunk_count, created_by, created_at "
             "FROM project_rag_files WHERE id = ?",
             (file_id,),
         ).fetchone()
-        return dict(row)
+        return dict(out)
 
 
 def update_chunk_count(file_id: int, project_id: int, chunk_count: int) -> None:
@@ -108,7 +107,6 @@ def update_chunk_count(file_id: int, project_id: int, chunk_count: int) -> None:
             "WHERE id = ? AND project_id = ?",
             (chunk_count, file_id, project_id),
         )
-        conn.commit()
 
 
 def delete_owned(file_id: int, project_id: int) -> dict | None:
@@ -126,5 +124,4 @@ def delete_owned(file_id: int, project_id: int) -> dict | None:
             "DELETE FROM project_rag_files WHERE id = ? AND project_id = ?",
             (file_id, project_id),
         )
-        conn.commit()
         return dict(row)

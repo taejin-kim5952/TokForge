@@ -19,8 +19,8 @@ def init_schema() -> None:
     with db.connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS project_documents (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id  INTEGER NOT NULL,
+                id          BIGSERIAL PRIMARY KEY,
+                project_id  BIGINT NOT NULL,
                 doc_type    TEXT    NOT NULL,
                 content     TEXT    NOT NULL,
                 updated_at  TEXT    NOT NULL,
@@ -32,7 +32,6 @@ def init_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_project_documents_project "
             "ON project_documents(project_id)"
         )
-        conn.commit()
 
 
 def get(project_id: int, doc_type: str) -> dict:
@@ -58,11 +57,10 @@ def save(project_id: int, doc_type: str, content: dict) -> dict:
             INSERT INTO project_documents (project_id, doc_type, content, updated_at)
             VALUES (?, ?, ?, ?)
             ON CONFLICT (project_id, doc_type)
-            DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at
+            DO UPDATE SET content = EXCLUDED.content, updated_at = EXCLUDED.updated_at
             """,
             (project_id, doc_type, content_json, now),
         )
-        conn.commit()
     logger.info("document saved: project=%d type=%s", project_id, doc_type)
     return {
         "project_id": project_id,

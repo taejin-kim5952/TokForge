@@ -5,8 +5,9 @@ owner 지정 불가 — 항상 `get_current_user()` 결과로부터 흘러옴.
 """
 
 import logging
-import sqlite3
 from datetime import datetime
+
+import psycopg2
 
 from app import db
 
@@ -22,8 +23,8 @@ def init_schema() -> None:
     with db.connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS projects (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                owner_user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                id             BIGSERIAL PRIMARY KEY,
+                owner_user_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 name           TEXT    NOT NULL,
                 description    TEXT,
                 created_at     TEXT    NOT NULL,
@@ -31,8 +32,9 @@ def init_schema() -> None:
                 UNIQUE (owner_user_id, name)
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_user_id)")
-        conn.commit()
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_user_id)"
+        )
 
 
 def list_for_owner(owner_user_id: int) -> list[dict]:
@@ -67,25 +69,26 @@ def create(owner_user_id: int, name: str, description: str | None = None) -> dic
     now = datetime.utcnow().isoformat()
     with db.connection() as conn:
         try:
-            cursor = conn.execute(
+            row = conn.execute(
                 "INSERT INTO projects (owner_user_id, name, description, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
                 (owner_user_id, name, description, now, now),
-            )
-            conn.commit()
-        except sqlite3.IntegrityError as e:
-            if "UNIQUE" in str(e):
-                raise DuplicateProjectName(f"project '{name}' already exists")
+            ).fetchone()
+        except psycopg2.IntegrityError as e:
+            if getattr(e, "pgcode", None) == "23505" or "unique" in str(e).lower():
+                raise DuplicateProjectName(f"project '{name}' already exists") from e
             raise
 
-        project_id = cursor.lastrowid
-        logger.info("project created: id=%d owner=%d name=%s", project_id, owner_user_id, name)
-        row = conn.execute(
+        project_id = row["id"]
+        logger.info(
+            "project created: id=%d owner=%d name=%s", project_id, owner_user_id, name
+        )
+        out = conn.execute(
             "SELECT id, name, description, created_at, updated_at "
             "FROM projects WHERE id = ?",
             (project_id,),
         ).fetchone()
-        return dict(row)
+        return dict(out)
 
 
 def delete_owned(project_id: int, owner_user_id: int) -> bool:
@@ -95,7 +98,6 @@ def delete_owned(project_id: int, owner_user_id: int) -> bool:
             "DELETE FROM projects WHERE id = ? AND owner_user_id = ?",
             (project_id, owner_user_id),
         )
-        conn.commit()
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("project deleted: id=%d owner=%d", project_id, owner_user_id)

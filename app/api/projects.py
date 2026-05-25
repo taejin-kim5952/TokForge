@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser
-from app.services import project_repo, rag_service
+from app.services import project_repo, rag_service, prompt_repo
 from app.services.project_repo import DuplicateProjectName
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,14 @@ def list_projects(user: CurrentUser) -> dict:
 def create_project(payload: CreateProjectRequest, user: CurrentUser) -> dict:
     """프로젝트 생성. 같은 이름 존재 시 409."""
     try:
-        return project_repo.create(user["id"], payload.name, payload.description)
+        project = project_repo.create(user["id"], payload.name, payload.description)
+        prompt_repo.seed_project_defaults(project["id"])
     except DuplicateProjectName as e:
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    return project
+
 
 
 @router.delete("/{project_id}")

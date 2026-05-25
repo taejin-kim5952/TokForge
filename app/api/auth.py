@@ -47,6 +47,19 @@ _GOOGLE_JWKS_URL  = "https://www.googleapis.com/oauth2/v3/certs"
 _STATE_TTL = timedelta(minutes=10)
 
 
+def init_schema() -> None:
+    """oauth_states 테이블 (PKCE 1회용 state)."""
+    with db.connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_states (
+                state          TEXT PRIMARY KEY,
+                code_verifier  TEXT NOT NULL,
+                return_to      TEXT,
+                created_at     TEXT NOT NULL
+            )
+        """)
+
+
 # ────────────── /me, /logout ──────────────
 
 @router.get("/me")
@@ -106,7 +119,6 @@ def google_login(return_to: str | None = Query(default=None)) -> RedirectRespons
         # 오래된 state 일괄 정리 (opportunistic GC)
         cutoff = (datetime.utcnow() - _STATE_TTL).isoformat()
         conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (cutoff,))
-        conn.commit()
 
     # Google authorize URL 조립
     params = {
@@ -239,7 +251,6 @@ def _consume_state(state: str) -> dict | None:
         if not row:
             return None
         conn.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
-        conn.commit()
         return dict(row)
 
 
@@ -251,11 +262,9 @@ def _validate_return_to(return_to: str | None) -> str:
     if not return_to:
         return FRONTEND_ORIGINS[0] + "/"
 
-    # 절대 경로만 (예: "/projects") → 기본 frontend origin과 합침
     if return_to.startswith("/"):
         return FRONTEND_ORIGINS[0].rstrip("/") + return_to
 
-    # 절대 URL이면 origin이 허용 목록에 있는지 확인
     parsed = urlparse(return_to)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     if origin not in FRONTEND_ORIGINS:

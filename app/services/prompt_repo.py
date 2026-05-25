@@ -1,109 +1,176 @@
-"""프롬프트 저장소 — SQLite 기반 버전 관리.
+"""프롬프트 저장소 — PostgreSQL 버전 관리.
 
-각 단계(refiner/classifier/compressor/system)별로 여러 버전을 저장하고,
-활성화된 한 버전만 실행 중 LLM 호출에 사용. 코드 수정/재기동 없이 교체 가능.
+`app.db` (DATABASE_URL) 와 동일한 Postgres 인스턴스를 사용합니다.
+
+전역(project_id IS NULL): refiner, classifier, compressor, system — /admin
+프로젝트(project_id = N): overview_chat, overview_organizer, requirements_chat,
+                          requirements_organizer — /projects/{id}/admin
 """
 
+from __future__ import annotations
+
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Any
 
 from app import db
 
 logger = logging.getLogger(__name__)
 
-VALID_KINDS = (
+GLOBAL_KINDS = (
     "refiner",
     "classifier",
     "compressor",
     "system",
+)
+
+PROJECT_KINDS = (
+    "overview_chat",
     "overview_organizer",
+    "requirements_chat",
     "requirements_organizer",
 )
 
+VALID_KINDS = GLOBAL_KINDS + PROJECT_KINDS
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _project_where(project_id: int | None) -> tuple[str, list[Any]]:
+    if project_id is None:
+        return "project_id IS NULL", []
+    return "project_id = ?", [project_id]
+
 
 def init_schema() -> None:
-    """앱 기동 시 1회. 테이블 없으면 생성."""
+    """prompts 테이블이 없으면 PostgreSQL DDL로 생성."""
     with db.connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prompts (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                id          BIGSERIAL PRIMARY KEY,
+                project_id  BIGINT REFERENCES projects(id) ON DELETE CASCADE,
                 kind        TEXT NOT NULL,
                 version     INTEGER NOT NULL,
                 body        TEXT NOT NULL,
                 is_active   INTEGER NOT NULL DEFAULT 0,
-                created_at  TEXT NOT NULL,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 note        TEXT,
-                UNIQUE(kind, version)
+                UNIQUE (project_id, kind, version)
             )
         """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_prompts_active ON prompts(kind, is_active)"
-        )
-        conn.commit()
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prompts_active
+            ON prompts (project_id, kind, is_active)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prompts_project_kind
+            ON prompts (project_id, kind)
+        """)
 
 
 def seed_if_empty() -> None:
-    """비어있는 kind를 v1으로 시드. 기존 kind는 건드리지 않음 (멱등)."""
+    """전역 kind 4종만 v1 시드 (project_id IS NULL). 멱등."""
     from app.services.refiner import REFINER_TEMPLATE
     from app.services.router import CLASSIFIER_TEMPLATE
     from app.services.compressor import COMPRESSOR_TEMPLATE
     from app.services.prompt import SYSTEM_TEMPLATE
+
+    seeds = {
+        "refiner": REFINER_TEMPLATE,
+        "classifier": CLASSIFIER_TEMPLATE,
+        "compressor": COMPRESSOR_TEMPLATE,
+        "system": SYSTEM_TEMPLATE,
+    }
+    _seed_kinds(seeds, project_id=None, label="global")
+
+
+def seed_project_defaults(project_id: int) -> None:
+    """프로젝트 생성 시 메뉴별 프롬프트 4종 v1 시드. 멱등."""
+    from app.api.project_ai.overview.overview import OVERVIEW_SYSTEM_PROMPT
     from app.api.project_ai.overview.prompts import OVERVIEW_ORGANIZER_PROMPT
+    from app.api.project_ai.requirements.requirements import REQUIREMENTS_SYSTEM_PROMPT
     from app.api.project_ai.requirements.prompts import REQUIREMENTS_ORGANIZER_PROMPT
 
     seeds = {
-        "refiner":                REFINER_TEMPLATE,
-        "classifier":             CLASSIFIER_TEMPLATE,
-        "compressor":             COMPRESSOR_TEMPLATE,
-        "system":                 SYSTEM_TEMPLATE,
-        "overview_organizer":     OVERVIEW_ORGANIZER_PROMPT,
+        "overview_chat": OVERVIEW_SYSTEM_PROMPT,
+        "overview_organizer": OVERVIEW_ORGANIZER_PROMPT,
+        "requirements_chat": REQUIREMENTS_SYSTEM_PROMPT,
         "requirements_organizer": REQUIREMENTS_ORGANIZER_PROMPT,
     }
+    _seed_kinds(seeds, project_id=project_id, label=f"project={project_id}")
 
+
+def _seed_kinds(
+    seeds: dict[str, str],
+    *,
+    project_id: int | None,
+    label: str,
+) -> None:
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
-        now = datetime.utcnow().isoformat()
+        now = _now_iso()
         seeded: list[str] = []
         for kind, body in seeds.items():
-            existing = conn.execute(
-                "SELECT COUNT(*) FROM prompts WHERE kind = ?", (kind,),
+            _validate_kind(kind)
+            row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM prompts WHERE kind = ? AND {pw}",
+                (kind, *pargs),
             ).fetchone()
-            if existing[0] > 0:
+            if row["c"] > 0:
                 continue
-            conn.execute(
-                "INSERT INTO prompts (kind, version, body, is_active, created_at, note) "
-                "VALUES (?, 1, ?, 1, ?, ?)",
-                (kind, body, now, "seeded from code constants"),
-            )
+            if project_id is None:
+                conn.execute(
+                    """
+                    INSERT INTO prompts (
+                        project_id, kind, version, body, is_active, created_at, note
+                    ) VALUES (NULL, ?, 1, ?, 1, ?, ?)
+                    """,
+                    (kind, body, now, "seeded from code constants"),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO prompts (
+                        project_id, kind, version, body, is_active, created_at, note
+                    ) VALUES (?, ?, 1, ?, 1, ?, ?)
+                    """,
+                    (project_id, kind, body, now, "seeded from code constants"),
+                )
             seeded.append(kind)
-        conn.commit()
         if seeded:
-            logger.info("prompts seeded: %s", seeded)
+            logger.info("prompts seeded (%s): %s", label, seeded)
         else:
-            logger.info("prompts already seeded for all kinds — skip")
+            logger.info("prompts already seeded (%s) — skip", label)
 
 
-def get_active(kind: str) -> str | None:
-    """현재 활성 프롬프트 본문 반환. 없으면 None."""
+def get_active(kind: str, project_id: int | None = None) -> str | None:
+    """활성 프롬프트 본문. project_id=None 이면 전역 행만."""
     _validate_kind(kind)
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
         row = conn.execute(
-            "SELECT body FROM prompts WHERE kind = ? AND is_active = 1 LIMIT 1",
-            (kind,),
+            f"""
+            SELECT body FROM prompts
+            WHERE kind = ? AND is_active = 1 AND {pw}
+            LIMIT 1
+            """,
+            (kind, *pargs),
         ).fetchone()
         return row["body"] if row else None
 
 
-def summary() -> list[dict]:
-    """전체 kind 요약 — Admin 대시보드용.
-
-    반환 예: [{"kind": "refiner", "active_version": 2, "total_versions": 3}, ...]
-    """
+def summary(project_id: int | None = None) -> list[dict]:
+    """kind별 active_version / total_versions 요약."""
+    kinds = PROJECT_KINDS if project_id is not None else GLOBAL_KINDS
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
         result = []
-        for kind in VALID_KINDS:
+        for kind in kinds:
             rows = conn.execute(
-                "SELECT version, is_active FROM prompts WHERE kind = ?",
-                (kind,),
+                f"SELECT version, is_active FROM prompts WHERE kind = ? AND {pw}",
+                (kind, *pargs),
             ).fetchall()
             active_versions = [r["version"] for r in rows if r["is_active"]]
             result.append({
@@ -114,98 +181,132 @@ def summary() -> list[dict]:
         return result
 
 
-def list_versions(kind: str) -> list[dict]:
-    """특정 kind의 모든 버전 메타데이터 반환 (body는 길이만, 본문 제외).
-
-    버전 최신순 정렬.
-    """
+def list_versions(kind: str, project_id: int | None = None) -> list[dict]:
     _validate_kind(kind)
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
         rows = conn.execute(
-            "SELECT id, version, is_active, created_at, note, length(body) AS body_length "
-            "FROM prompts WHERE kind = ? ORDER BY version DESC",
-            (kind,),
+            f"""
+            SELECT id, version, is_active, created_at, note,
+                   char_length(body) AS body_length
+            FROM prompts
+            WHERE kind = ? AND {pw}
+            ORDER BY version DESC
+            """,
+            (kind, *pargs),
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_version(kind: str, version: int) -> dict | None:
-    """특정 버전의 전체 데이터 (본문 포함) 반환."""
+def get_version(
+    kind: str,
+    version: int,
+    project_id: int | None = None,
+) -> dict | None:
     _validate_kind(kind)
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
         row = conn.execute(
-            "SELECT id, kind, version, body, is_active, created_at, note "
-            "FROM prompts WHERE kind = ? AND version = ?",
-            (kind, version),
+            f"""
+            SELECT id, kind, version, body, is_active, created_at, note, project_id
+            FROM prompts
+            WHERE kind = ? AND version = ? AND {pw}
+            """,
+            (kind, version, *pargs),
         ).fetchone()
         return dict(row) if row else None
 
 
-def save_new_version(kind: str, body: str, note: str | None = None) -> dict:
-    """새 버전 생성. version은 max+1 자동 할당. is_active=0 (활성화는 별도 호출).
-
-    반환: 신규 row의 {id, version}.
-    """
+def save_new_version(
+    kind: str,
+    body: str,
+    note: str | None = None,
+    *,
+    project_id: int | None = None,
+) -> dict:
     _validate_kind(kind)
     if not body or not body.strip():
         raise ValueError("body must not be empty")
 
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(MAX(version), 0) AS max_v FROM prompts WHERE kind = ?",
-            (kind,),
+        max_row = conn.execute(
+            f"SELECT COALESCE(MAX(version), 0) AS max_v FROM prompts WHERE kind = ? AND {pw}",
+            (kind, *pargs),
         ).fetchone()
-        new_version = row["max_v"] + 1
-        now = datetime.utcnow().isoformat()
+        new_version = int(max_row["max_v"]) + 1
+        now = _now_iso()
 
-        cursor = conn.execute(
-            "INSERT INTO prompts (kind, version, body, is_active, created_at, note) "
-            "VALUES (?, ?, ?, 0, ?, ?)",
-            (kind, new_version, body, now, note),
+        if project_id is None:
+            row = conn.execute(
+                """
+                INSERT INTO prompts (
+                    project_id, kind, version, body, is_active, created_at, note
+                ) VALUES (NULL, ?, ?, ?, 0, ?, ?)
+                RETURNING id
+                """,
+                (kind, new_version, body, now, note),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                INSERT INTO prompts (
+                    project_id, kind, version, body, is_active, created_at, note
+                ) VALUES (?, ?, ?, ?, 0, ?, ?)
+                RETURNING id
+                """,
+                (project_id, kind, new_version, body, now, note),
+            ).fetchone()
+        new_id = row["id"]
+        logger.info(
+            "prompt saved: project_id=%r kind=%s version=%d id=%s",
+            project_id, kind, new_version, new_id,
         )
-        conn.commit()
-        logger.info("prompt saved: kind=%s version=%d id=%d", kind, new_version, cursor.lastrowid)
-        return {"id": cursor.lastrowid, "version": new_version}
+        return {"id": new_id, "version": new_version}
 
 
-def activate(kind: str, version: int) -> None:
-    """지정 버전을 활성으로 전환. 같은 kind의 다른 버전들은 자동 비활성.
-
-    트랜잭션으로 atomic 보장.
-    """
+def activate(
+    kind: str,
+    version: int,
+    project_id: int | None = None,
+) -> None:
     _validate_kind(kind)
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
-        target = conn.execute(
-            "SELECT id FROM prompts WHERE kind = ? AND version = ?",
-            (kind, version),
-        ).fetchone()
-        if not target:
+        if not conn.execute(
+            f"SELECT id FROM prompts WHERE kind = ? AND version = ? AND {pw}",
+            (kind, version, *pargs),
+        ).fetchone():
             raise ValueError(f"prompt not found: kind={kind} version={version}")
 
-        try:
-            conn.execute("BEGIN")
-            conn.execute(
-                "UPDATE prompts SET is_active = 0 WHERE kind = ? AND is_active = 1",
-                (kind,),
-            )
-            conn.execute(
-                "UPDATE prompts SET is_active = 1 WHERE kind = ? AND version = ?",
-                (kind, version),
-            )
-            conn.commit()
-            logger.info("prompt activated: kind=%s version=%d", kind, version)
-        except Exception:
-            conn.rollback()
-            raise
+        conn.execute(
+            f"UPDATE prompts SET is_active = 0 WHERE kind = ? AND is_active = 1 AND {pw}",
+            (kind, *pargs),
+        )
+        conn.execute(
+            f"""
+            UPDATE prompts SET is_active = 1
+            WHERE kind = ? AND version = ? AND {pw}
+            """,
+            (kind, version, *pargs),
+        )
+        logger.info(
+            "prompt activated: project_id=%r kind=%s version=%d",
+            project_id, kind, version,
+        )
 
 
-def delete_version(kind: str, version: int) -> None:
-    """버전 삭제. 활성 버전은 삭제 거부 (먼저 다른 버전 활성화 필요)."""
+def delete_version(
+    kind: str,
+    version: int,
+    project_id: int | None = None,
+) -> None:
     _validate_kind(kind)
+    pw, pargs = _project_where(project_id)
     with db.connection() as conn:
         row = conn.execute(
-            "SELECT is_active FROM prompts WHERE kind = ? AND version = ?",
-            (kind, version),
+            f"SELECT is_active FROM prompts WHERE kind = ? AND version = ? AND {pw}",
+            (kind, version, *pargs),
         ).fetchone()
         if not row:
             raise ValueError(f"prompt not found: kind={kind} version={version}")
@@ -214,13 +315,14 @@ def delete_version(kind: str, version: int) -> None:
                 f"cannot delete active version (kind={kind} version={version}) — "
                 "activate another version first"
             )
-
         conn.execute(
-            "DELETE FROM prompts WHERE kind = ? AND version = ?",
-            (kind, version),
+            f"DELETE FROM prompts WHERE kind = ? AND version = ? AND {pw}",
+            (kind, version, *pargs),
         )
-        conn.commit()
-        logger.info("prompt deleted: kind=%s version=%d", kind, version)
+        logger.info(
+            "prompt deleted: project_id=%r kind=%s version=%d",
+            project_id, kind, version,
+        )
 
 
 def _validate_kind(kind: str) -> None:

@@ -18,7 +18,7 @@ def init_schema() -> None:
     with db.connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS project_requirements (
-                project_id     INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+                project_id     BIGINT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
                 business_name  TEXT NOT NULL DEFAULT '',
                 system_name    TEXT NOT NULL DEFAULT '',
                 created_at     TEXT NOT NULL,
@@ -27,8 +27,8 @@ def init_schema() -> None:
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS project_requirement_rows (
-                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id           INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                id                   BIGSERIAL PRIMARY KEY,
+                project_id           BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 row_order            INTEGER NOT NULL,
                 business_category    TEXT NOT NULL DEFAULT '',
                 requirement_category TEXT NOT NULL DEFAULT '',
@@ -44,7 +44,6 @@ def init_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_project_req_rows_project_order
             ON project_requirement_rows(project_id, row_order)
         """)
-        conn.commit()
 
 
 def get(project_id: int) -> dict:
@@ -85,47 +84,40 @@ def save(
     now = datetime.utcnow().isoformat()
     safe_rows = rows or []
     with db.connection() as conn:
-        try:
-            # 메타 UPSERT
+        conn.execute(
+            """
+            INSERT INTO project_requirements
+            (project_id, business_name, system_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (project_id) DO UPDATE SET
+                business_name = EXCLUDED.business_name,
+                system_name   = EXCLUDED.system_name,
+                updated_at    = EXCLUDED.updated_at
+            """,
+            (project_id, business_name or "", system_name or "", now, now),
+        )
+        conn.execute(
+            "DELETE FROM project_requirement_rows WHERE project_id = ?",
+            (project_id,),
+        )
+        for idx, row in enumerate(safe_rows):
             conn.execute(
                 """
-                INSERT INTO project_requirements
-                (project_id, business_name, system_name, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (project_id) DO UPDATE SET
-                    business_name = excluded.business_name,
-                    system_name   = excluded.system_name,
-                    updated_at    = excluded.updated_at
+                INSERT INTO project_requirement_rows
+                (project_id, row_order, business_category, requirement_category,
+                 requirement_id, req_no, name, detail, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, business_name or "", system_name or "", now, now),
+                (
+                    project_id, idx,
+                    (row.get("business_category") or ""),
+                    (row.get("requirement_category") or ""),
+                    (row.get("requirement_id") or ""),
+                    (row.get("req_no") or ""),
+                    (row.get("name") or ""),
+                    (row.get("detail") or ""),
+                    now, now,
+                ),
             )
-            # 모든 행 삭제 + 재삽입
-            conn.execute(
-                "DELETE FROM project_requirement_rows WHERE project_id = ?",
-                (project_id,),
-            )
-            for idx, row in enumerate(safe_rows):
-                conn.execute(
-                    """
-                    INSERT INTO project_requirement_rows
-                    (project_id, row_order, business_category, requirement_category,
-                     requirement_id, req_no, name, detail, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        project_id, idx,
-                        (row.get("business_category") or ""),
-                        (row.get("requirement_category") or ""),
-                        (row.get("requirement_id") or ""),
-                        (row.get("req_no") or ""),
-                        (row.get("name") or ""),
-                        (row.get("detail") or ""),
-                        now, now,
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
     logger.info("requirements saved: project=%d rows=%d", project_id, len(safe_rows))
     return get(project_id)

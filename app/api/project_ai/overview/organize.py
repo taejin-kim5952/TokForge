@@ -31,7 +31,7 @@ async def organize_overview(
     user: CurrentUser,
     payload: OrganizeRequest,
 ) -> dict:
-    """대화 → 9개 폼 필드 구조화 마크다운."""
+    """대화 → 6개 폼 필드 구조화 마크다운."""
 
     # 1. 대화 소유권 + 프로젝트 매칭 검증
     conv = conversation_repo.get_owned(payload.conversation_id, user["id"])
