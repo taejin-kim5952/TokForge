@@ -2,6 +2,8 @@
 
 > **프로젝트마다 전문가가 되는 AI 오케스트레이션 워크스페이스**
 
+**🌐 서비스:** [https://www.tokforge.ai](https://www.tokforge.ai)
+
 ![Version](https://img.shields.io/badge/version-0.1-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -13,7 +15,7 @@ AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·�
 | 저장소 | 역할 |
 |--------|------|
 | **TokForge** (이 repo) | FastAPI 백엔드 — 파이프라인, DB, OAuth, 프로젝트 API |
-| **[TokForge.io](../TokForge.io)** | Vite + React 프론트 — 랜딩, ProjectBoard, Admin, Project Admin |
+| **[TokForge.ai](https://www.tokforge.ai)** | Vite + React 프론트 — [www.tokforge.ai](https://www.tokforge.ai) (소스 폴더: [`TokForge.io/`](../TokForge.io)) |
 
 ---
 
@@ -177,7 +179,7 @@ app/api/
 
 `main.py`에서 위 라우터 일괄 등록.
 
-### 프론트 (TokForge.io)
+### 프론트 (TokForge.ai)
 
 | 영역 | 상태 |
 |------|------|
@@ -219,13 +221,13 @@ python -m uvicorn main:app --reload --port 8000
 ### 프론트
 
 ```powershell
-cd D:\tuning\TokForge.io
+cd D:\tuning\TokForge.io   # 프론트 저장소 폴더명 (제품·도메인은 TokForge.ai)
 npm install
 # .env: VITE_BACKEND_URL=http://localhost:8000
 npm run dev
 ```
 
-→ API 문서: http://localhost:8000/docs · UI: http://localhost:5173
+→ **운영 UI:** https://www.tokforge.ai · 로컬 UI: http://localhost:5173 · API 문서: http://localhost:8000/docs
 
 상세: [개발내용/01-quick-start.md](../개발내용/01-quick-start.md)
 

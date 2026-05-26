@@ -67,6 +67,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "https://www.tokforge.ai",
         "https://tokforge-frontend.blackrock-5366afe3.koreacentral.azurecontainerapps.io",
         "https://www.tokforge.ai.kr",
     ],
