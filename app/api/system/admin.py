@@ -40,10 +40,17 @@ from app.services import project_repo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin")
+
+TAG_STATUS = "admin-status"
+TAG_PROMPTS = "admin-prompts"
+TAG_CONVERSATIONS = "admin-conversations"
+TAG_TRAINING = "admin-training"
+TAG_PROJECTS = "admin-projects"
+TAG_RAG = "admin-rag"
 
 
-@router.get("/status")
+@router.get("/status", tags=[TAG_STATUS])
 async def status() -> dict:
     """시스템 상태 + 활성 설정 + 모니터 통계 한 번에 반환."""
     ollama_ok = False
@@ -87,13 +94,13 @@ class CreatePromptRequest(BaseModel):
     note: str | None = Field(None, description="선택 — 변경 사유 메모")
 
 
-@router.get("/prompts")
+@router.get("/prompts", tags=[TAG_PROMPTS])
 def list_prompts_summary() -> dict:
     """4종 kind별 활성 버전 + 총 버전 수 요약."""
     return {"kinds": prompt_repo.summary()}
 
 
-@router.get("/prompts/{kind}")
+@router.get("/prompts/{kind}", tags=[TAG_PROMPTS])
 def list_prompt_versions(kind: str) -> dict:
     """특정 kind의 버전 목록 (본문은 길이만)."""
     try:
@@ -103,7 +110,7 @@ def list_prompt_versions(kind: str) -> dict:
     return {"kind": kind, "versions": versions}
 
 
-@router.get("/prompts/{kind}/{version}")
+@router.get("/prompts/{kind}/{version}", tags=[TAG_PROMPTS])
 def get_prompt_version(kind: str, version: int) -> dict:
     """특정 버전 전체 (본문 포함)."""
     try:
@@ -115,7 +122,7 @@ def get_prompt_version(kind: str, version: int) -> dict:
     return row
 
 
-@router.post("/prompts/{kind}", status_code=201)
+@router.post("/prompts/{kind}", status_code=201, tags=[TAG_PROMPTS])
 def create_prompt_version(kind: str, payload: CreatePromptRequest) -> dict:
     """새 버전 생성 (version 자동 할당, is_active=0). 별도 activate 호출 필요."""
     try:
@@ -125,7 +132,7 @@ def create_prompt_version(kind: str, payload: CreatePromptRequest) -> dict:
     return result
 
 
-@router.post("/prompts/{kind}/{version}/activate")
+@router.post("/prompts/{kind}/{version}/activate", tags=[TAG_PROMPTS])
 def activate_prompt_version(kind: str, version: int) -> dict:
     """지정 버전을 활성으로 전환."""
     try:
@@ -135,7 +142,7 @@ def activate_prompt_version(kind: str, version: int) -> dict:
     return {"ok": True}
 
 
-@router.get("/conversations")
+@router.get("/conversations", tags=[TAG_CONVERSATIONS])
 def list_all_conversations(
     project_id: int | None = None,
     limit: int = 100,
@@ -171,7 +178,7 @@ def list_all_conversations(
         }
 
 
-@router.get("/conversations/{conversation_id}/messages")
+@router.get("/conversations/{conversation_id}/messages", tags=[TAG_CONVERSATIONS])
 def get_conversation_messages(conversation_id: str) -> dict:
     """특정 대화의 메시지 목록 반환 (admin 전용)."""
     with db.connection() as conn:
@@ -187,7 +194,7 @@ def get_conversation_messages(conversation_id: str) -> dict:
         return {"messages": [dict(r) for r in rows]}
 
 
-@router.get("/training/export")
+@router.get("/training/export", tags=[TAG_TRAINING])
 def export_training_data(
     min_rating: int = 4,
     project_id: int | None = None,
@@ -206,7 +213,7 @@ def export_training_data(
     )
 
 
-@router.delete("/prompts/{kind}/{version}")
+@router.delete("/prompts/{kind}/{version}", tags=[TAG_PROMPTS])
 def delete_prompt_version(kind: str, version: int) -> dict:
     """버전 삭제 — 활성 버전은 삭제 거부."""
     try:
@@ -220,7 +227,7 @@ def delete_prompt_version(kind: str, version: int) -> dict:
 # Admin 공통: 전체 프로젝트 목록
 # ─────────────────────────────────────────────
 
-@router.get("/projects")
+@router.get("/projects", tags=[TAG_PROJECTS])
 def list_all_projects() -> dict:
     """전체 사용자의 모든 프로젝트 목록 (admin 전용)."""
     with db.connection() as conn:
@@ -235,7 +242,7 @@ def list_all_projects() -> dict:
 # Admin RAG 관리 (프로젝트별)
 # ─────────────────────────────────────────────
 
-@router.get("/rag/sources")
+@router.get("/rag/sources", tags=[TAG_RAG])
 def rag_list_sources(project_id: int | None = None) -> dict:
     """프로젝트(또는 글로벌)의 업로드된 문서 목록 반환."""
     sources = get_rag(project_id).list_sources()
@@ -243,7 +250,7 @@ def rag_list_sources(project_id: int | None = None) -> dict:
     return {"project_id": project_id, "sources": sources, "stats": stats}
 
 
-@router.post("/rag/upload")
+@router.post("/rag/upload", tags=[TAG_RAG])
 async def rag_upload(
     file: UploadFile = File(...),
     project_id: int | None = None,
@@ -265,7 +272,7 @@ async def rag_upload(
     }
 
 
-@router.delete("/rag/sources")
+@router.delete("/rag/sources", tags=[TAG_RAG])
 def rag_delete_source(source: str, project_id: int | None = None) -> dict:
     """특정 문서의 모든 청크를 삭제 후 인덱스 재구성."""
     deleted = get_rag(project_id).delete_source(source)
@@ -275,7 +282,7 @@ def rag_delete_source(source: str, project_id: int | None = None) -> dict:
     return {"ok": True, "project_id": project_id, "source": source, "deleted_chunks": deleted}
 
 
-@router.get("/rag/search")
+@router.get("/rag/search", tags=[TAG_RAG])
 def rag_search(q: str, project_id: int | None = None, k: int = 5) -> dict:
     """검색 테스트 — 관리자 확인용."""
     if not q.strip():

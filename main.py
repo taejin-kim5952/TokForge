@@ -5,25 +5,29 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import (
+from app.api.system import (
     admin,
     auth,
-    cache,
-    chat,
-    compressor,
-    conversations,
     health,
     models,
     monitor,
-    projects,
+)
+from app.api.llm import (
+    cache,
+    chat,
+    classify,
+    compressor,
     prompt,
     rag,
     refiner,
-    router as router_api,
+)
+from app.api.project import (
+    ai as project_ai,
+    admin as project_admin,
+    conversations,
+    projects,
+    rag as project_rag,
     wbs,
-    project_ai,
-    project_admin,
-    project_rag,
 )
 
 from app import db
@@ -40,6 +44,17 @@ app = FastAPI(
     title="TokForge",
     description="AI 프롬프트를 최적화해 토큰 사용량을 줄이는 Agent Middleware",
     version="0.1.0",
+    openapi_tags=[
+        {"name": "admin-status", "description": "플랫폼 Admin — 시스템·Ollama 상태"},
+        {"name": "admin-prompts", "description": "플랫폼 Admin — 전역 프롬프트 (refiner 등)"},
+        {"name": "admin-conversations", "description": "플랫폼 Admin — 대화 이력"},
+        {"name": "admin-training", "description": "플랫폼 Admin — 학습 데이터 export"},
+        {"name": "admin-projects", "description": "플랫폼 Admin — 전체 프로젝트 목록"},
+        {"name": "admin-rag", "description": "플랫폼 Admin — RAG 문서·검색"},
+        {"name": "project-admin", "description": "프로젝트 Admin — 소유 프로젝트 설정"},
+        {"name": "project-rag", "description": "프로젝트 RAG — 문서 업로드·관리"},
+        {"name": "project-ai", "description": "프로젝트 작업 화면 — 개요·요구사항 AI"},
+    ],
 )
 
 
@@ -71,7 +86,7 @@ app.include_router(rag.router)
 app.include_router(prompt.router)
 app.include_router(refiner.router)
 app.include_router(compressor.router)
-app.include_router(router_api.router)
+app.include_router(classify.router)
 app.include_router(monitor.router)
 app.include_router(admin.router)
 app.include_router(auth.router)

@@ -88,10 +88,10 @@ def seed_if_empty() -> None:
 
 def seed_project_defaults(project_id: int) -> None:
     """프로젝트 생성 시 메뉴별 프롬프트 4종 v1 시드. 멱등."""
-    from app.api.project_ai.overview.overview import OVERVIEW_SYSTEM_PROMPT
-    from app.api.project_ai.overview.prompts import OVERVIEW_ORGANIZER_PROMPT
-    from app.api.project_ai.requirements.requirements import REQUIREMENTS_SYSTEM_PROMPT
-    from app.api.project_ai.requirements.prompts import REQUIREMENTS_ORGANIZER_PROMPT
+    from app.api.project.ai.overview.overview import OVERVIEW_SYSTEM_PROMPT
+    from app.api.project.ai.overview.prompts import OVERVIEW_ORGANIZER_PROMPT
+    from app.api.project.ai.requirements.requirements import REQUIREMENTS_SYSTEM_PROMPT
+    from app.api.project.ai.requirements.prompts import REQUIREMENTS_ORGANIZER_PROMPT
 
     seeds = {
         "overview_chat": OVERVIEW_SYSTEM_PROMPT,

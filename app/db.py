@@ -124,7 +124,7 @@ def connection() -> Iterator[PgConnection]:
 
 def init_all_schemas() -> None:
     """앱 기동 시 모든 Postgres 테이블 생성 (의존 순서)."""
-    from app.api import auth
+    from app.api.system import auth
     from app.services import (
         conversation_repo,
         document_repo,

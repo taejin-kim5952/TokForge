@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, OwnedProject
 from app.llm import ollama
-from app.services import conversation_repo, document_repo
+from app.services import conversation_repo, document_repo, prompt_repo
 from app.services.rag_context import format_rag_prompt_block, search_rag_context
 
 router = APIRouter(tags=["프로젝트 개요"])
@@ -49,10 +49,16 @@ class OverviewAiRequest(BaseModel):
 
 
 def _build_system_prompt(
+    project_id: int,
     document_context: dict | None,
     rag_context: str | None = None,
 ) -> str:
-    system = OVERVIEW_SYSTEM_PROMPT
+    system = (
+        prompt_repo.get_active("overview_chat", project_id=project_id)
+        or OVERVIEW_SYSTEM_PROMPT
+    )
+    logger.info("system프롬프트 ===> %s", system)
+
     if document_context:
         ctx_lines = "\n".join(
             f"- {k}: {v}" for k, v in document_context.items() if v
@@ -76,7 +82,7 @@ def _build_ollama_request(payload: OverviewAiRequest, project_id: int) -> dict:
     _chunk_count, rag_context = search_rag_context(query, project_id=project_id)
     rag_text = rag_context or None
 
-    system = _build_system_prompt(payload.document_context, rag_text)
+    system = _build_system_prompt(project_id, payload.document_context, rag_text)
     messages = [{"role": "system", "content": system}] + payload.messages
     return {
         "model": payload.model,
@@ -139,6 +145,7 @@ async def overview_ai(
     - assistant 빈 메시지 미리 생성 → 스트림 종료 시 content 확정
     - 응답 헤더로 X-Conversation-Id, X-Assistant-Message-Id 반환
     """
+    logger.info("## 입력정보 >>>> %s", payload.model_dump())
     # 1) conversation 보장
     cid = payload.conversation_id
     if cid:
