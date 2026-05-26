@@ -76,7 +76,20 @@ GOOGLE_REDIRECT_URI  = os.environ.get(
 SESSION_COOKIE_NAME = "tf_session"
 SESSION_TTL_DAYS = 30
 SESSION_REFRESH_THRESHOLD_DAYS = 7  # 만료까지 N일 이하 남으면 자동 연장
-COOKIE_SECURE = ENV == "prod"  # HTTPS 환경에서만 True
+
+# 프론트(www.tokforge.ai.kr) ≠ API(ngrok 등) 일 때 크로스 사이트 쿠키 필요
+def _api_is_public_https() -> bool:
+    uri = GOOGLE_REDIRECT_URI
+    return uri.startswith("https://") and "localhost" not in uri and "127.0.0.1" not in uri
+
+
+_SESSION_CROSS_SITE_ENV = os.environ.get("SESSION_CROSS_SITE", "").lower()
+SESSION_CROSS_SITE = _SESSION_CROSS_SITE_ENV in ("1", "true", "yes") or (
+    _SESSION_CROSS_SITE_ENV not in ("0", "false", "no") and _api_is_public_https()
+)
+COOKIE_SAMESITE: str = "none" if SESSION_CROSS_SITE else "lax"
+# SameSite=None 은 브라우저가 Secure 필수
+COOKIE_SECURE = SESSION_CROSS_SITE or ENV == "prod"
 
 # 프론트엔드 origin 허용 목록 — return_to 검증에 사용 (open-redirect 차단)
 FRONTEND_ORIGINS = [

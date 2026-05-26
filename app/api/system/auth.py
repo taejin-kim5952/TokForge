@@ -24,12 +24,14 @@ from fastapi.responses import RedirectResponse
 from app import db
 from app.api.deps import CurrentUser
 from app.config import (
+    COOKIE_SAMESITE,
     COOKIE_SECURE,
     FRONTEND_ORIGINS,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI,
     SESSION_COOKIE_NAME,
+    SESSION_CROSS_SITE,
     SESSION_TTL_DAYS,
 )
 from app.services import session_repo, user_repo
@@ -37,6 +39,28 @@ from app.services import session_repo, user_repo
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
+
+
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_id,
+        max_age=SESSION_TTL_DAYS * 86400,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+    )
+
 
 # Google OAuth 표준 endpoint들 (변하지 않는 상수)
 _GOOGLE_AUTH_URL  = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -83,12 +107,7 @@ def logout(
     """세션 삭제 + 쿠키 정리. 멱등."""
     if tf_session:
         session_repo.delete(tf_session)
-    response.delete_cookie(
-        SESSION_COOKIE_NAME,
-        path="/",
-        secure=COOKIE_SECURE,
-        samesite="lax",
-    )
+    _clear_session_cookie(response)
     return {"ok": True}
 
 
@@ -213,16 +232,15 @@ async def google_callback(
 
     # 프론트로 redirect (쿠키 첨부)
     redirect = RedirectResponse(return_to, status_code=302)
-    redirect.set_cookie(
-        SESSION_COOKIE_NAME,
-        session_id,
-        max_age=SESSION_TTL_DAYS * 86400,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
-        path="/",
+    _set_session_cookie(redirect, session_id)
+    logger.info(
+        "login success: user_id=%d email=%s cookie secure=%s samesite=%s cross_site=%s",
+        user["id"],
+        user["email"],
+        COOKIE_SECURE,
+        COOKIE_SAMESITE,
+        SESSION_CROSS_SITE,
     )
-    logger.info("login success: user_id=%d email=%s", user["id"], user["email"])
     return redirect
 
 
