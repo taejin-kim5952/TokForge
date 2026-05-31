@@ -49,7 +49,7 @@ AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·�
 ```
 
 - **전역 프롬프트** 4종(`refiner`, `classifier`, `compressor`, `system`): 플랫폼 `/admin` — DB 버전 관리, 무재기동 교체.
-- **프로젝트 프롬프트** 4종(`overview_chat`, `overview_organizer`, `requirements_chat`, `requirements_organizer`): `/projects/{id}/admin` — 프로젝트·kind별 격리.
+- **프로젝트 프롬프트** (`overview_chat` / `overview_organizer` 글로벌, `overview_chat_*` / `overview_organizer_*` 개요 6탭, `requirements_*`): `/projects/{id}/admin` — 프로젝트·kind별 격리.
 
 ---
 
@@ -78,7 +78,7 @@ AI 클라이언트와 모델 사이에서 요청을 가로채 정제·캐시·�
 
 | 탭 | 백엔드 | 프론트 |
 |----|--------|--------|
-| **프롬프트** | ✅ CRUD + 활성화 | 2단 탭(개요/요구사항 AI × 채팅/내용정리) · 에디터 · 버전 표 · 새 버전 저장/되돌리기/활성화/삭제 |
+| **프롬프트** | ✅ CRUD + 활성화 | 개요/요구사항 AI · 개요는 글로벌(우측 패널)+6단계 탭별 kind · 채팅/내용정리 · 버전 표 |
 | **RAG** | ⏳ (`/admin/rag/*` 미구현, 보드 `project/rag`는 동작) | UI 준비 |
 | **대화·학습** | ⏳ (`/admin/conversations`, `training/export` 미구현) | UI 준비 |
 
@@ -117,8 +117,10 @@ HTTP body는 JSON이지만, **대화 내용은 Chat API 관례의 평문**입니
 
 | kind | 실행 API | DB 프롬프트 연동 |
 |------|----------|------------------|
-| `overview_chat` | `POST /projects/{id}/ai/overview` | ✅ `get_active(..., project_id)` |
-| `overview_organizer` | `POST .../ai/overview/organize` | ⚠️ `get_active` **전역만** (project_id 미전달) |
+| `overview_chat` | `POST /projects/{id}/ai/overview` (`scope` 없음) | ✅ |
+| `overview_chat_<tab>` | 동일 API (`scope` = 탭 id) | ✅ |
+| `overview_organizer` | `POST .../ai/overview/organize` (대화 `scope` 없음) | ✅ `project_id` |
+| `overview_organizer_<tab>` | 동일 organize (탭 대화) | ✅ |
 | `requirements_chat` | `POST .../ai/requirements` | ❌ 코드 `REQUIREMENTS_SYSTEM_PROMPT` |
 | `requirements_organizer` | `POST .../ai/requirements/organize` | ⚠️ 전역만 |
 
@@ -159,9 +161,10 @@ HTTP body는 JSON이지만, **대화 내용은 Chat API 관례의 평문**입니
 | 영역 | 상태 | 비고 |
 |------|------|------|
 | 전역 4종 `/admin/prompts` | ✅ | `app/api/system/admin.py` |
-| 프로젝트 4종 `/projects/{id}/admin/prompts` | ✅ GET·POST·activate·DELETE |
+| 프로젝트 Admin prompts `/projects/{id}/admin/prompts` | ✅ GET·POST·activate·DELETE |
 | `prompts.project_id` | ✅ | 전역 NULL / 프로젝트 N |
-| 개요 채팅에 Admin 프롬프트 반영 | ✅ | `overview_chat` + `project_id` |
+| 개요 채팅·탭별 프롬프트 | ✅ | `scope` → `overview_chat_*` / 없음 → `overview_chat` |
+| 개요 organize·탭별 | ✅ | 대화 `scope` → `overview_organizer_*` |
 | 요구사항 채팅·organizer·project_id | ⏳ | 위 표 참고 |
 
 ### API 패키지 구조 (리팩터링 완료)

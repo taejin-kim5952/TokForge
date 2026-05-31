@@ -100,3 +100,7 @@ FRONTEND_ORIGINS = [
 
 # 개발 편의 — 설정 시 OAuth 없이 그 user_id로 인증된 것처럼 동작 (운영에서 절대 사용 X)
 DEV_USER_ID = os.environ.get("DEV_USER_ID")  # str or None
+
+# 공개 데모 프로젝트 — 로그인 없이 /projects/{id}/… API 접근 (admin·DELETE 제외)
+_demo_raw = os.environ.get("DEMO_PROJECT_ID", "4").strip()
+DEMO_PROJECT_ID: int | None = int(_demo_raw) if _demo_raw.isdigit() else None

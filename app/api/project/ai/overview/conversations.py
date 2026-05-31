@@ -5,7 +5,7 @@
 """
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.api.deps import CurrentUser, OwnedProject
 from app.services import conversation_repo
@@ -16,7 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/{project_id}/conversations")
-def list_project_conversations(project: OwnedProject, user: CurrentUser) -> dict:
+def list_project_conversations(
+    project: OwnedProject,
+    user: CurrentUser,
+    scope: str | None = Query(
+        None,
+        description="생략=전체; scope= 빈값=글로벌 패널 대화만; 그 외=탭 ID와 일치",
+    ),
+) -> dict:
     """프로젝트의 대화 목록 (최신순, 메시지 수 + has_organize 포함)."""
     return {
         "conversations": conversation_repo.list_by_project(
@@ -24,6 +31,7 @@ def list_project_conversations(project: OwnedProject, user: CurrentUser) -> dict
             project["id"],
             menu_key=conversation_repo.MENU_OVERVIEW,
             limit=50,
+            scope=scope,
         ),
     }
 

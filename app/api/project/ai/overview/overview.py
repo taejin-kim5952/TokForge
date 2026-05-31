@@ -46,18 +46,31 @@ class OverviewAiRequest(BaseModel):
     document_context: dict | None = None
     model: str | None = None
     stream: bool = True
+    scope: str | None = None
+
+
+def _norm_conversation_scope(value: str | None) -> str | None:
+    """빈문자·공백만 → None (글로벌과 동일)."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
 
 
 def _build_system_prompt(
     project_id: int,
     document_context: dict | None,
     rag_context: str | None = None,
+    *,
+    scope: str | None = None,
 ) -> str:
+    kind = prompt_repo.overview_chat_prompt_kind(scope)
     system = (
-        prompt_repo.get_active("overview_chat", project_id=project_id)
+        prompt_repo.get_active(kind, project_id=project_id)
+        or prompt_repo.get_active("overview_chat", project_id=project_id)
         or OVERVIEW_SYSTEM_PROMPT
     )
-    logger.info("system프롬프트 ===> %s", system)
+    logger.info("system프롬프트 kind=%s ===> %s", kind, system[:200] if system else "")
 
     if document_context:
         ctx_lines = "\n".join(
@@ -81,8 +94,13 @@ def _build_ollama_request(payload: OverviewAiRequest, project_id: int) -> dict:
     query = _last_user_content(payload.messages)
     _chunk_count, rag_context = search_rag_context(query, project_id=project_id)
     rag_text = rag_context or None
-
-    system = _build_system_prompt(project_id, payload.document_context, rag_text)
+    logger.info("payload.document_context>> %s", payload.document_context)
+    system = _build_system_prompt(
+        project_id,
+        payload.document_context,
+        rag_text,
+        scope=_norm_conversation_scope(payload.scope),
+    )
     messages = [{"role": "system", "content": system}] + payload.messages
     return {
         "model": payload.model,
@@ -146,14 +164,17 @@ async def overview_ai(
     - 응답 헤더로 X-Conversation-Id, X-Assistant-Message-Id 반환
     """
     logger.info("## 입력정보 >>>> %s", payload.model_dump())
+    req_scope = _norm_conversation_scope(payload.scope)
     # 1) conversation 보장
     cid = payload.conversation_id
     if cid:
         conv = conversation_repo.get_owned(cid, user["id"])
+        conv_scope = _norm_conversation_scope(conv.get("scope") if conv else None)
         if (
             not conv
             or conv.get("project_id") != project["id"]
             or conv.get("menu_key") != conversation_repo.MENU_OVERVIEW
+            or conv_scope != req_scope
         ):
             # 다른 사용자/프로젝트/메뉴의 conversation_id — 새로 생성
             cid = None
@@ -163,6 +184,7 @@ async def overview_ai(
             title=_derive_title(payload.messages),
             project_id=project["id"],
             menu_key=conversation_repo.MENU_OVERVIEW,
+            scope=req_scope,
         )
         cid = conv["id"]
 

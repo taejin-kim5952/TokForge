@@ -61,16 +61,27 @@ async def chat_completion(request: dict) -> dict:
     """비스트리밍 채팅 호출. 응답 JSON 그대로 반환."""
     _ensure_model(request)
     _convert_images_to_vision_format(request)
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        if _is_azure_model(request.get("model", "")):
-            response = await client.post(
-                AZURE_OPENAI_BASE_URL,
-                json=request,
-                headers={"api-key": AZURE_OPENAI_API_KEY},
-            )
-        else:
-            response = await client.post(OLLAMA_CHAT_URL, json=request)
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            if _is_azure_model(request.get("model", "")):
+                response = await client.post(
+                    AZURE_OPENAI_BASE_URL,
+                    json=request,
+                    headers={"api-key": AZURE_OPENAI_API_KEY},
+                )
+            else:
+                response = await client.post(OLLAMA_CHAT_URL, json=request)
+    except httpx.RequestError as e:
+        raise RuntimeError(f"LLM 서버 연결 실패: {e}") from e
+
+    if response.status_code >= 400:
+        body = response.text[:500]
+        raise RuntimeError(f"LLM HTTP {response.status_code}: {body}")
+
+    try:
         return response.json()
+    except ValueError as e:
+        raise RuntimeError("LLM 응답이 JSON이 아님") from e
 
 
 async def chat_completion_stream(request: dict):

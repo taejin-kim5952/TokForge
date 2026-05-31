@@ -12,8 +12,12 @@ main.py 에 단일 진입점으로 제공한다.
 from fastapi import APIRouter
 from app.api.project.ai.overview import router as overview_router
 from app.api.project.ai.requirements import router as requirements_router
+from app.api.project.ai.features import router as features_router
+from app.api.project.ai.ppt import router as ppt_router
 
 router = APIRouter(prefix="/projects", tags=["project-ai"])
 
 router.include_router(overview_router)
 router.include_router(requirements_router)
+router.include_router(features_router)
+router.include_router(ppt_router)

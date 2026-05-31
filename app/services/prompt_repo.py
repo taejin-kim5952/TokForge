@@ -3,8 +3,9 @@
 `app.db` (DATABASE_URL) 와 동일한 Postgres 인스턴스를 사용합니다.
 
 전역(project_id IS NULL): refiner, classifier, compressor, system — /admin
-프로젝트(project_id = N): overview_chat, overview_organizer, requirements_chat,
-                          requirements_organizer — /projects/{id}/admin
+프로젝트(project_id = N): overview_chat / overview_organizer(글로벌 패널),
+                          overview_chat_{tab}, overview_organizer_{tab}(개요 6탭),
+                          requirements_chat, requirements_organizer — /projects/{id}/admin
 """
 
 from __future__ import annotations
@@ -24,11 +25,62 @@ GLOBAL_KINDS = (
     "system",
 )
 
+# 개요 6탭 — ProjectBoard OVERVIEW_TABS id 와 동일 (conversation.scope)
+OVERVIEW_AI_TAB_IDS: tuple[str, ...] = (
+    "summary",
+    "bg-goal",
+    "scope",
+    "features",
+    "plan",
+    "reference",
+)
+
+
+def _overview_tab_slug(tab_id: str) -> str:
+    return tab_id.replace("-", "_")
+
+
+def overview_chat_prompt_kind(scope: str | None) -> str:
+    """scope 가 탭이면 overview_chat_summary 등, 글로벌이면 overview_chat."""
+    if scope is None:
+        return "overview_chat"
+    s = str(scope).strip()
+    if not s:
+        return "overview_chat"
+    if s not in OVERVIEW_AI_TAB_IDS:
+        return "overview_chat"
+    return f"overview_chat_{_overview_tab_slug(s)}"
+
+
+def overview_organizer_prompt_kind(scope: str | None) -> str:
+    """대화 scope 기준 organizer 프롬프트 kind."""
+    if scope is None:
+        return "overview_organizer"
+    s = str(scope).strip()
+    if not s:
+        return "overview_organizer"
+    if s not in OVERVIEW_AI_TAB_IDS:
+        return "overview_organizer"
+    return f"overview_organizer_{_overview_tab_slug(s)}"
+
+
+def _overview_tab_prompt_kinds() -> tuple[str, ...]:
+    out: list[str] = []
+    for tid in OVERVIEW_AI_TAB_IDS:
+        slug = _overview_tab_slug(tid)
+        out.append(f"overview_chat_{slug}")
+        out.append(f"overview_organizer_{slug}")
+    return tuple(out)
+
+
 PROJECT_KINDS = (
     "overview_chat",
     "overview_organizer",
+    *_overview_tab_prompt_kinds(),
     "requirements_chat",
     "requirements_organizer",
+    "features_chat",
+    "features_organizer",
 )
 
 VALID_KINDS = GLOBAL_KINDS + PROJECT_KINDS
@@ -86,20 +138,46 @@ def seed_if_empty() -> None:
     _seed_kinds(seeds, project_id=None, label="global")
 
 
-def seed_project_defaults(project_id: int) -> None:
-    """프로젝트 생성 시 메뉴별 프롬프트 4종 v1 시드. 멱등."""
+def _project_default_prompt_bodies() -> dict[str, str]:
+    """프로젝트 전용 프롬프트 기본 본문 (글로벌 + 개요 6탭 + 요구사항)."""
     from app.api.project.ai.overview.overview import OVERVIEW_SYSTEM_PROMPT
     from app.api.project.ai.overview.prompts import OVERVIEW_ORGANIZER_PROMPT
     from app.api.project.ai.requirements.requirements import REQUIREMENTS_SYSTEM_PROMPT
     from app.api.project.ai.requirements.prompts import REQUIREMENTS_ORGANIZER_PROMPT
+    from app.api.project.ai.features.features import FEATURES_SYSTEM_PROMPT
+    from app.api.project.ai.features.prompts import FEATURES_ORGANIZER_PROMPT
 
-    seeds = {
+    seeds: dict[str, str] = {
         "overview_chat": OVERVIEW_SYSTEM_PROMPT,
         "overview_organizer": OVERVIEW_ORGANIZER_PROMPT,
         "requirements_chat": REQUIREMENTS_SYSTEM_PROMPT,
         "requirements_organizer": REQUIREMENTS_ORGANIZER_PROMPT,
+        "features_chat": FEATURES_SYSTEM_PROMPT,
+        "features_organizer": FEATURES_ORGANIZER_PROMPT,
     }
-    _seed_kinds(seeds, project_id=project_id, label=f"project={project_id}")
+    for tid in OVERVIEW_AI_TAB_IDS:
+        slug = _overview_tab_slug(tid)
+        seeds[f"overview_chat_{slug}"] = OVERVIEW_SYSTEM_PROMPT
+        seeds[f"overview_organizer_{slug}"] = OVERVIEW_ORGANIZER_PROMPT
+    return seeds
+
+
+def seed_project_defaults(project_id: int) -> None:
+    """프로젝트 생성 시 메뉴별 프롬프트 v1 시드. 멱등."""
+    _seed_kinds(
+        _project_default_prompt_bodies(),
+        project_id=project_id,
+        label=f"project={project_id}",
+    )
+
+
+def ensure_project_prompt_seeds(project_id: int) -> None:
+    """기존 프로젝트에 확장된 kind(개요 6탭 등)가 없으면 시드. Admin 등에서 멱등 호출."""
+    _seed_kinds(
+        _project_default_prompt_bodies(),
+        project_id=project_id,
+        label=f"ensure-prompts project={project_id}",
+    )
 
 
 def _seed_kinds(

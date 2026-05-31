@@ -128,6 +128,7 @@ def init_all_schemas() -> None:
     from app.services import (
         conversation_repo,
         document_repo,
+        project_features_repo,
         project_repo,
         project_requirements_repo,
         prompt_repo,
@@ -144,4 +145,5 @@ def init_all_schemas() -> None:
     document_repo.init_schema()
     rag_file_repo.init_schema()
     project_requirements_repo.init_schema()
+    project_features_repo.init_schema()
     prompt_repo.init_schema()

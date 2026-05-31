@@ -48,12 +48,19 @@ class RAGStore:
     def __init__(self, project_id: int | None = None):
         self.project_id = project_id
         self.rag_dir = _rag_dir(project_id)
-        self.embeddings = _get_embeddings()
+        self._embeddings: HuggingFaceEmbeddings | None = None
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
             chunk_overlap=CHUNK_OVERLAP,
         )
+        # 인덱스 없으면 임베딩 모델 로드 생략 (PPT/통계 등 가벼운 API 부하 방지)
         self.store: FAISS | None = self._load_or_create()
+
+    @property
+    def embeddings(self) -> HuggingFaceEmbeddings:
+        if self._embeddings is None:
+            self._embeddings = _get_embeddings()
+        return self._embeddings
 
     def _load_or_create(self) -> FAISS | None:
         """Windows 한글 경로 우회 — LangChain save_local/load_local 대신 수동 직렬화."""

@@ -28,6 +28,7 @@ from app.api.project import (
     projects,
     rag as project_rag,
     wbs,
+    stats as project_stats
 )
 
 from app import db
@@ -74,7 +75,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Conversation-Id", "X-Assistant-Message-Id"],
+    expose_headers=["X-Conversation-Id", "X-Assistant-Message-Id", "Content-Disposition"],
 )
 
 
@@ -97,3 +98,4 @@ app.include_router(project_rag.router)
 app.include_router(conversations.router)
 app.include_router(wbs.router)
 app.include_router(project_ai.router)
+app.include_router(project_stats.router)

@@ -49,6 +49,17 @@ def list_for_owner(owner_user_id: int) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_by_id(project_id: int) -> dict | None:
+    """ID로 단건 조회 (소유자 무관). 데모 프로젝트·내부 lookup용."""
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT id, owner_user_id, name, description, created_at, updated_at "
+            "FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def get_owned(project_id: int, owner_user_id: int) -> dict | None:
     """소유자 확인하며 단건 조회. 남의 거면 None."""
     with db.connection() as conn:

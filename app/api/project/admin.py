@@ -3,7 +3,7 @@
 프론트 `/projects/{project_id}/admin` 화면과 연동한다.
 
 - 프롬프트: 메뉴별 AI·내용정리 system 프롬프트 버전 조회·CRUD
-  (`overview_chat`, `overview_organizer`, `requirements_chat`, `requirements_organizer`)
+  (개요 글로벌 + 6탭별, 요구사항 — ``prompt_repo.PROJECT_KINDS``)
 - (예정) RAG·대화 이력·학습 export
 
 경로 prefix: `/projects/{project_id}/admin/...`
@@ -60,21 +60,23 @@ def list_project_prompts_summary(
     project: OwnedProject,
     user: CurrentUser,
 ) -> dict:
-    """프로젝트 Admin 프롬프트 탭 — 4종 kind별 버전 요약.
+    """프로젝트 Admin 프롬프트 탭 — kind별 버전 요약.
 
     로그인한 사용자가 해당 프로젝트 소유자일 때만 응답한다.
     ``OwnedProject`` 가 ``project_id`` 소유 여부를 검증하고,
     ``user`` 는 세션 쿠키 기반 인증(미로그인 시 401)용이다.
 
-    대상 kind (프로젝트 전용 4종만, 플랫폼 ``/admin/prompts`` 와 분리):
+    대상 kind (프로젝트 전용 — 플랫폼 ``/admin/prompts`` 와 분리):
 
-    - ``overview_chat``, ``overview_organizer``
+    - ``overview_chat``, ``overview_organizer`` (우측 글로벌 패널)
+    - ``overview_chat_*``, ``overview_organizer_*`` (개요 6탭, slug = 탭 id 의 ``-`` → ``_``)
     - ``requirements_chat``, ``requirements_organizer``
 
     Returns:
         ``{"kinds": [{"kind", "active_version", "total_versions"}, ...]}``
         프론트 2차 탭(채팅/내용정리)의 ``vN · N versions`` 메타 표시에 사용한다.
     """
+    prompt_repo.ensure_project_prompt_seeds(project["id"])
     kinds = prompt_repo.summary(project_id=project["id"])
     return {"kinds": kinds}
 
@@ -92,7 +94,7 @@ def list_project_prompt_versions(
     ``GET .../prompts/{kind}/{version}`` 로 조회한다.
 
     Args:
-        kind: ``overview_chat`` | ``overview_organizer`` |
+        kind: ``overview_chat`` | ``overview_organizer`` | ``overview_chat_summary`` | … |
             ``requirements_chat`` | ``requirements_organizer``
 
     Returns:

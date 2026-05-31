@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 MENU_TOKFORGE = "tokforge"
 MENU_OVERVIEW = "overview"
 MENU_REQUIREMENTS = "requirements"
+MENU_FEATURES = "features"
 
 
 def _now() -> str:
@@ -86,6 +87,19 @@ def init_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_conversations_owner_project_menu_updated
             ON conversations(owner_user_id, project_id, menu_key, updated_at DESC)
         """)
+        col_scope = conn.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'conversations'
+              AND column_name = 'scope'
+            """
+        ).fetchone()
+        if not col_scope:
+            conn.execute("ALTER TABLE conversations ADD COLUMN scope TEXT")
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversations_owner_project_menu_scope_updated
+            ON conversations(owner_user_id, project_id, menu_key, scope, updated_at DESC)
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id               TEXT PRIMARY KEY,
@@ -126,6 +140,7 @@ def create(
     conversation_id: str | None = None,
     project_id: int | None = None,
     menu_key: str = MENU_TOKFORGE,
+    scope: str | None = None,
 ) -> dict:
     cid = conversation_id or str(uuid.uuid4())
     title = title.strip() or "New chat"
@@ -143,11 +158,11 @@ def create(
         conn.execute(
             """
             INSERT INTO conversations (
-                id, owner_user_id, project_id, menu_key, title, created_at, updated_at
+                id, owner_user_id, project_id, menu_key, title, created_at, updated_at, scope
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (cid, owner_user_id, project_id, menu_key, title, now, now),
+            (cid, owner_user_id, project_id, menu_key, title, now, now, scope),
         )
     return get_owned(cid, owner_user_id)  # type: ignore[return-value]
 
@@ -155,7 +170,7 @@ def create(
 def get_owned(conversation_id: str, owner_user_id: int) -> dict | None:
     with db.connection() as conn:
         row = conn.execute(
-            "SELECT id, project_id, menu_key, title, created_at, updated_at "
+            "SELECT id, project_id, menu_key, title, created_at, updated_at, scope "
             "FROM conversations WHERE id = ? AND owner_user_id = ?",
             (conversation_id, owner_user_id),
         ).fetchone()
@@ -290,11 +305,27 @@ def list_by_project(
     *,
     menu_key: str,
     limit: int = 50,
+    scope: str | None = None,
 ) -> list[dict]:
-    """프로젝트·메뉴(overview 등)별 대화 목록 + 메시지 수 + has_organize 집계."""
+    """프로젝트·메뉴(overview 등)별 대화 목록 + 메시지 수 + has_organize 집계.
+
+    scope:
+      None — 필터 없음 (기존 동작, 전체 목록)
+      "" (빈 문자열) — scope IS NULL 인 대화만 (글로벌 우측 패널)
+      그 외 — 해당 탭 ID 등과 정확히 일치
+    """
+    where_extra = ""
+    params: list[object] = [owner_user_id, project_id, menu_key]
+    if scope is not None:
+        if scope == "":
+            where_extra = " AND (c.scope IS NULL OR c.scope = '')"
+        else:
+            where_extra = " AND c.scope = ?"
+            params.append(scope)
+    params.append(limit)
     with db.connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT
                 c.id, c.title, c.created_at, c.updated_at,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
@@ -305,10 +336,11 @@ def list_by_project(
                 ) AS has_organize
             FROM conversations c
             WHERE c.owner_user_id = ? AND c.project_id = ? AND c.menu_key = ?
+            {where_extra}
             ORDER BY c.updated_at DESC
             LIMIT ?
             """,
-            (owner_user_id, project_id, menu_key, limit),
+            tuple(params),
         ).fetchall()
         return [
             {
