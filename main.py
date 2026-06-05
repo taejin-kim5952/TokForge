@@ -23,7 +23,8 @@ from app.api.llm import (
 )
 from app.api.project import (
     ai as project_ai,
-    admin as project_admin,
+    admin as project_admin_prompt,
+    project_admin as project_admin_pkg,
     conversations,
     projects,
     rag as project_rag,
@@ -53,6 +54,13 @@ app = FastAPI(
         {"name": "admin-projects", "description": "플랫폼 Admin — 전체 프로젝트 목록"},
         {"name": "admin-rag", "description": "플랫폼 Admin — RAG 문서·검색"},
         {"name": "project-admin", "description": "프로젝트 Admin — 소유 프로젝트 설정"},
+        {
+            "name": "project-admin-modelfile",
+            "description": (
+                "프로젝트 Modelfile — Ollama Modelfile 조립·미리보기·"
+                "ollama create·활성 모델(ollama_model)·생성 이력(modelfile_jobs)"
+            ),
+        },
         {"name": "project-rag", "description": "프로젝트 RAG — 문서 업로드·관리"},
         {"name": "project-ai", "description": "프로젝트 작업 화면 — 개요·요구사항 AI"},
     ],
@@ -93,7 +101,8 @@ app.include_router(monitor.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(projects.router)
-app.include_router(project_admin.router)
+app.include_router(project_admin_prompt.router)
+app.include_router(project_admin_pkg.router)
 app.include_router(project_rag.router)
 app.include_router(conversations.router)
 app.include_router(wbs.router)
