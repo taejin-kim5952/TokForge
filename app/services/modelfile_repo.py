@@ -17,7 +17,7 @@ def create_job(
     project_id: int,
     base_model: str,
     output_model: str,
-    modelfile_path: str | None = None,   
+    modelfile_path: str | None = None,
 ) -> dict:
     now = _now()
     with db.connection() as conn:
@@ -27,12 +27,14 @@ def create_job(
                 (project_id, base_model, output_model, modelfile_path,
                  status, created_at)
             VALUES (?, ?, ?, ?, 'pending', ?)
-            RETURNING id
+            RETURNING id, project_id, base_model, output_model, modelfile_path,
+                      status, error_message, created_at, completed_at
             """,
             (project_id, base_model, output_model, modelfile_path, now),
         ).fetchone()
-        job_id = int(row["id"])
-        return get_for_project(job_id, project_id)
+        if not row:
+            raise RuntimeError("failed to create modelfile job")
+        return dict(row)
     
 def mark_running(job_id: int, project_id: int) -> dict | None:
     return _set_status(job_id, project_id, "running")

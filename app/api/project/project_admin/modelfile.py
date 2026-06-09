@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.api.deps import CurrentUser, OwnedProject
 from app.services import modelfile_repo, project_repo
+
 from app.services.modelfile_service import (
     KNOWN_PARAMETERS,
     ModelfileValidationError,
@@ -319,6 +320,7 @@ def preview_modelfile(
     """
     try:
         text = assemble_modelfile_from_form(body.to_service_payload())
+        logger.info(f"text : {text} ")
     except ModelfileValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"modelfile": text}

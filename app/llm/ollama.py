@@ -4,7 +4,10 @@ request["model"] 이 이미 지정돼 있으면 그대로 사용 (Step 7 라우�
 없으면 DEFAULT_MODEL 로 폴백.
 """
 
+import logging
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.config import (
     OLLAMA_CHAT_URL, 
@@ -61,9 +64,12 @@ async def chat_completion(request: dict) -> dict:
     """비스트리밍 채팅 호출. 응답 JSON 그대로 반환."""
     _ensure_model(request)
     _convert_images_to_vision_format(request)
+    logger.info("ollama start #1")
+    logger.info(f"ollama mode : {request.get('model')} ")
     try:
         async with httpx.AsyncClient(timeout=300.0) as client:
             if _is_azure_model(request.get("model", "")):
+                logger.info("ollama start #1_1")
                 response = await client.post(
                     AZURE_OPENAI_BASE_URL,
                     json=request,
@@ -73,7 +79,7 @@ async def chat_completion(request: dict) -> dict:
                 response = await client.post(OLLAMA_CHAT_URL, json=request)
     except httpx.RequestError as e:
         raise RuntimeError(f"LLM 서버 연결 실패: {e}") from e
-
+    logger.info("ollama start #2")
     if response.status_code >= 400:
         body = response.text[:500]
         raise RuntimeError(f"LLM HTTP {response.status_code}: {body}")

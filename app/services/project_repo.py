@@ -5,7 +5,7 @@ owner 지정 불가 — 항상 `get_current_user()` 결과로부터 흘러옴.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import psycopg2
 
@@ -53,11 +53,35 @@ def get_by_id(project_id: int) -> dict | None:
     """ID로 단건 조회 (소유자 무관). 데모 프로젝트·내부 lookup용."""
     with db.connection() as conn:
         row = conn.execute(
-            "SELECT id, owner_user_id, name, description, created_at, updated_at "
+            "SELECT id, owner_user_id, name, description, created_at, updated_at, "
+            "ollama_model, ollama_model_at "
             "FROM projects WHERE id = ?",
             (project_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+def set_ollama_model(project_id: int, ollama_model: str) -> dict | None:
+    """프로젝트 활성 Ollama 모델명 설정."""
+    now = datetime.now(timezone.utc).isoformat()
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE projects SET ollama_model = ?, ollama_model_at = ?, updated_at = ? "
+            "WHERE id = ?",
+            (ollama_model, now, now, project_id),
+        )
+    return get_by_id(project_id)
+
+
+def clear_ollama_model(project_id: int) -> None:
+    """프로젝트 활성 Ollama 모델명 해제."""
+    now = datetime.now(timezone.utc).isoformat()
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE projects SET ollama_model = NULL, ollama_model_at = NULL, "
+            "updated_at = ? WHERE id = ?",
+            (now, project_id),
+        )
 
 
 def get_owned(project_id: int, owner_user_id: int) -> dict | None:
@@ -77,7 +101,7 @@ def create(owner_user_id: int, name: str, description: str | None = None) -> dic
     if not name:
         raise ValueError("name must not be empty")
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     with db.connection() as conn:
         try:
             row = conn.execute(
@@ -113,3 +137,40 @@ def delete_owned(project_id: int, owner_user_id: int) -> bool:
         if deleted:
             logger.info("project deleted: id=%d owner=%d", project_id, owner_user_id)
         return deleted
+    
+def update_project(
+    project_id: int,
+    owner_user_id: int,
+    name: str,
+    description: str | None = None,
+) -> bool:
+    """소유자 확인하며 name/description 수정. 성공 시 True, 없거나 남의 것이면 False."""
+    name = name.strip()
+    if not name:
+        raise ValueError("name must not be empty")
+
+    now = datetime.now(timezone.utc).isoformat()
+    with db.connection() as conn:
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE projects
+                SET name = ?, description = ?, updated_at = ?
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (name, description, now, project_id, owner_user_id),
+            )
+        except psycopg2.IntegrityError as e:
+            if getattr(e, "pgcode", None) == "23505" or "unique" in str(e).lower():
+                raise DuplicateProjectName(f"project '{name}' already exists") from e
+            raise
+
+        updated = cursor.rowcount > 0
+        if updated:
+            logger.info(
+                "project updated: id=%d owner=%d name=%s",
+                project_id,
+                owner_user_id,
+                name,
+            )
+        return updated

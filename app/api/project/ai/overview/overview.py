@@ -165,7 +165,7 @@ async def overview_ai(
     """
     logger.info("## 입력정보 >>>> %s", payload.model_dump())
     req_scope = _norm_conversation_scope(payload.scope)
-    # 1) conversation 보장
+    # 1) 맞는 기존 대화가 있으면 이어 쓰고, 없거나 안 맞으면 새로 만든다.(conversation 보장
     cid = payload.conversation_id
     if cid:
         conv = conversation_repo.get_owned(cid, user["id"])

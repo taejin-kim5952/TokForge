@@ -1,6 +1,13 @@
-"""세련된 디자인 build_pptx — 색·타입·룰선 위주의 에디토리얼 톤.
-시그니처(build_pptx(deck))와 슬라이드 type 키는 기존과 동일."""
+"""데이터 주도 PPT 빌더 — 템플릿(TemplateContent JSON)을 해석해 .pptx 를 렌더한다.
+
+기존 하드코딩 3종 레이아웃 대신, 템플릿의 blocks[*].elements 를 인터프리터가
+요소별로 그린다. build_pptx(deck) 처럼 template 없이 호출하면 DEFAULT_TEMPLATE
+(editorial = 기존 디자인)로 폴백하므로 기존 호출부와 호환된다.
+
+바인딩/트랜스폼 계약은 ppt_presets.py 상단 주석 참고.
+"""
 import io
+import logging
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -8,29 +15,17 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.util import Inches, Pt, Emu
 
-# ─────────────────────────────────────────────
-#  THEME  (이 블록만 바꾸면 전체 톤이 바뀜)
-# ─────────────────────────────────────────────
-INK         = RGBColor(0x0F, 0x17, 0x2A)   # 본문/제목
-INK_SOFT    = RGBColor(0x33, 0x3D, 0x52)   # 부제·메타
-MUTE        = RGBColor(0x8A, 0x91, 0xA3)   # 페이지번호·캡션
-RULE        = RGBColor(0xD9, 0xD7, 0xCE)   # 룰선
-PAPER       = RGBColor(0xFA, 0xFA, 0xF7)   # 본문 배경
-INK_PAPER   = RGBColor(0xF1, 0xEE, 0xE6)   # 표지·간지 배경(살짝 더 따뜻)
-ACCENT      = RGBColor(0xC2, 0x41, 0x0C)   # 단일 액센트 (테라코타)
+from .ppt_presets import DEFAULT_TEMPLATE
 
-FONT_HEAD   = "Pretendard"      # 없으면 자동으로 맑은 고딕로 폴백됨 (PowerPoint 측에서)
-FONT_BODY   = "Pretendard"
-FONT_MONO   = "Consolas"        # 메타·페이지번호용
+logger = logging.getLogger(__name__)
 
-SLIDE_W = Inches(13.333)
-SLIDE_H = Inches(7.5)
-MARGIN  = Inches(0.85)          # 좌우 공통 마진
-_BLANK  = 6
+FONT_BODY = "Pretendard"        # 폰트 ref 해석 실패 시 최종 폴백
+_FALLBACK_COLOR = "9AA0AD"
+_BLANK = 6
 
 
 # ─────────────────────────────────────────────
-#  Low-level helpers
+#  Low-level helpers (기존 유지)
 # ─────────────────────────────────────────────
 def _bg(slide, color):
     f = slide.background.fill
@@ -50,7 +45,9 @@ def _rect(slide, left, top, width, height, color, line=False):
 
 def _line(slide, left, top, width, color, thickness_pt=0.75):
     """얇은 가로 룰선 — 두께를 Pt로 정확히 컨트롤."""
-    sh = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, Emu(int(Pt(thickness_pt))))
+    sh = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, left, top, width, Emu(int(Pt(thickness_pt)))
+    )
     sh.fill.solid()
     sh.fill.fore_color.rgb = color
     sh.line.fill.background()
@@ -68,8 +65,8 @@ def _box(slide, left, top, width, height, anchor=None):
     return tf
 
 
-def _para(tf, text, *, size, color, bold=False, align=PP_ALIGN.LEFT,
-          space_after=6, line_spacing=None, font=None, tracking=None, first=False):
+def _para(tf, text, *, size, color, bold=False, italic=False, align=PP_ALIGN.LEFT,
+          space_after=6, line_spacing=None, font=None, first=False):
     p = tf.paragraphs[0] if first else tf.add_paragraph()
     p.alignment = align
     p.space_after = Pt(space_after)
@@ -79,185 +76,329 @@ def _para(tf, text, *, size, color, bold=False, align=PP_ALIGN.LEFT,
     r.text = text
     r.font.size = Pt(size)
     r.font.bold = bold
+    r.font.italic = italic
     r.font.color.rgb = color
     r.font.name = font or FONT_BODY
     return p
 
 
+def _run(paragraph, text, *, size, color, bold=False, italic=False, font=None):
+    r = paragraph.add_run()
+    r.text = text
+    r.font.size = Pt(size)
+    r.font.bold = bold
+    r.font.italic = italic
+    r.font.color.rgb = color
+    r.font.name = font or FONT_BODY
+    return r
+
+
 # ─────────────────────────────────────────────
-#  Footer  (본문 슬라이드 공통)
+#  Resolve helpers (theme ref / enum / binding)
 # ─────────────────────────────────────────────
-def _footer(slide, deck_title, page_no, total):
-    y = SLIDE_H - Inches(0.55)
-    _line(slide, MARGIN, y, SLIDE_W - MARGIN * 2, RULE, thickness_pt=0.5)
-    # 좌측: 덱 제목
-    tf = _box(slide, MARGIN, y + Inches(0.08), Inches(8), Inches(0.35))
-    _para(tf, deck_title, size=9, color=MUTE, font=FONT_MONO, first=True, space_after=0)
-    # 우측: 페이지 번호
-    tf = _box(slide, SLIDE_W - MARGIN - Inches(4), y + Inches(0.08), Inches(4), Inches(0.35))
+_ALIGN = {"left": PP_ALIGN.LEFT, "center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}
+_ANCHOR = {"top": MSO_ANCHOR.TOP, "middle": MSO_ANCHOR.MIDDLE, "bottom": MSO_ANCHOR.BOTTOM}
+_ROMANS = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+           "XI", "XII", "XIII", "XIV", "XV"]
+
+
+def _roman(n):
+    return _ROMANS[n] + "." if 0 < n < len(_ROMANS) else f"{n:02d}."
+
+
+def _color(theme, ref):
+    hexv = (theme.get("colors", {}) or {}).get(ref)
+    if not hexv:
+        logger.warning("unknown color ref %r", ref)
+        hexv = _FALLBACK_COLOR
+    return RGBColor.from_string(hexv.lstrip("#"))
+
+
+def _font(theme, ref):
+    return (theme.get("fonts", {}) or {}).get(ref) or FONT_BODY
+
+
+def _align_of(v):
+    return _ALIGN.get(v, PP_ALIGN.LEFT)
+
+
+def _anchor_of(v):
+    return _ANCHOR.get(v)
+
+
+def _apply_transforms(s, transforms):
+    for tr in transforms or []:
+        if tr == "upper":
+            s = s.upper()
+        elif tr == "lower":
+            s = s.lower()
+        elif tr == "trim":
+            s = s.strip()
+        elif tr == "pad2":
+            try:
+                s = f"{int(s):02d}"
+            except (TypeError, ValueError):
+                pass
+        elif tr == "roman":
+            try:
+                s = _roman(int(s))
+            except (TypeError, ValueError):
+                pass
+    return s
+
+
+def _resolve_bind(bind, slide, ctx, item=None, index=None):
+    if not bind:
+        return ""
+    if bind.startswith("deck."):
+        return str(ctx["deck"].get(bind[5:], "") or "")
+    if bind == "@pageNo":
+        return str(ctx["page_no"])
+    if bind == "@total":
+        return str(ctx["total"])
+    if bind == "@sectionNo":
+        return str(ctx["section_no"])
+    if bind == "@sectionTitle":
+        return str(ctx.get("section_title") or "")
+    if bind == "@index":
+        return str(0 if index is None else index)
+    if bind == "@itemNo":
+        return str(1 if index is None else index + 1)
+    if bind == "@item":
+        if item is None or isinstance(item, dict):
+            return ""
+        return str(item)
+    if bind.startswith("@item."):
+        return str(item.get(bind[6:], "")) if isinstance(item, dict) else ""
+    val = slide.get(bind, "")
+    return "" if val is None else str(val)
+
+
+# ─────────────────────────────────────────────
+#  Element interpreter
+# ─────────────────────────────────────────────
+def _style_para(tf, text, theme, style, *, first=True):
     _para(
-        tf, f"{page_no:02d} / {total:02d}",
-        size=9, color=INK_SOFT, font=FONT_MONO,
-        align=PP_ALIGN.RIGHT, first=True, space_after=0,
+        tf, text,
+        size=style.get("size", 18),
+        color=_color(theme, style.get("color", "ink")),
+        bold=style.get("bold", False),
+        italic=style.get("italic", False),
+        align=_align_of(style.get("align")),
+        space_after=style.get("spaceAfter", 6),
+        line_spacing=style.get("lineSpacing"),
+        font=_font(theme, style.get("font", "body")),
+        first=first,
     )
 
 
-# ─────────────────────────────────────────────
-#  Slide kinds
-# ─────────────────────────────────────────────
-def _title_slide(prs, sd, deck_title):
-    s = prs.slides.add_slide(prs.slide_layouts[_BLANK])
-    _bg(s, INK_PAPER)
-
-    # 좌상단 워드마크
-    tf = _box(s, MARGIN, Inches(0.7), Inches(6), Inches(0.4))
-    _para(tf, deck_title.upper(), size=10, color=INK_SOFT,
-          font=FONT_MONO, bold=True, first=True, space_after=0)
-
-    # 우상단 메타 (선택적: 부제 표기용)
-    meta = (sd.get("meta") or "").strip()
-    if meta:
-        tf = _box(s, SLIDE_W - MARGIN - Inches(6), Inches(0.7), Inches(6), Inches(0.4))
-        _para(tf, meta, size=10, color=INK_SOFT,
-              font=FONT_MONO, align=PP_ALIGN.RIGHT, first=True, space_after=0)
-
-    # 얇은 가로 룰 (상단)
-    _line(s, MARGIN, Inches(1.15), SLIDE_W - MARGIN * 2, RULE, 0.5)
-
-    # 중앙 좌측 — 큰 제목 + 부제
-    title = sd.get("title") or deck_title
-    tf = _box(s, MARGIN, Inches(3.5), SLIDE_W - MARGIN * 2, Inches(2.6))
-    _para(tf, title, size=64, color=INK, bold=True,
-          line_spacing=1.05, first=True, space_after=18)
-    sub = (sd.get("subtitle") or "").strip()
-    if sub:
-        _para(tf, sub, size=20, color=INK_SOFT, line_spacing=1.35, space_after=0)
-
-    # 액센트 라인 (좌하단)
-    _line(s, MARGIN, SLIDE_H - Inches(0.85), Inches(1.4), ACCENT, 1.5)
+def _render_text(slide, el, kind, theme, slide_data, ctx):
+    g = el["geom"]
+    style = el.get("style", {})
+    if kind == "text":
+        text = _apply_transforms(el.get("text", ""), el.get("transform"))
+    elif kind == "bound":
+        text = _apply_transforms(
+            _resolve_bind(el["bind"], slide_data, ctx), el.get("transform")
+        )
+        if not text:
+            text = el.get("fallback", "")
+    else:  # pageNumber
+        text = (el.get("format", "")
+                .replace("{page:02d}", f"{ctx['page_no']:02d}")
+                .replace("{total:02d}", f"{ctx['total']:02d}"))
+    if not text:
+        return
+    tf = _box(slide, Inches(g["x"]), Inches(g["y"]), Inches(g["w"]), Inches(g["h"]),
+              anchor=_anchor_of(style.get("anchor")))
+    _style_para(tf, text, theme, style)
 
 
-def _section_slide(prs, sd, section_no, deck_title, page_no, total):
-    s = prs.slides.add_slide(prs.slide_layouts[_BLANK])
-    _bg(s, INK_PAPER)
-
-    # 상단 라벨 "SECTION"
-    tf = _box(s, MARGIN, Inches(0.7), Inches(6), Inches(0.4))
-    _para(tf, "SECTION", size=10, color=ACCENT,
-          font=FONT_MONO, bold=True, first=True, space_after=0)
-
-    _line(s, MARGIN, Inches(1.15), SLIDE_W - MARGIN * 2, RULE, 0.5)
-
-    # 거대한 섹션 번호 (배경처럼)
-    roman = _roman(section_no)
-    tf = _box(s, MARGIN, Inches(2.2), Inches(6.5), Inches(3.5),
-              anchor=MSO_ANCHOR.TOP)
-    _para(tf, roman, size=160, color=INK, bold=True,
-          font=FONT_HEAD, line_spacing=0.95, first=True, space_after=0)
-
-    # 섹션 제목 (큰 번호 옆)
-    tf = _box(s, Inches(6.4), Inches(3.2), SLIDE_W - Inches(6.4) - MARGIN, Inches(2.5),
-              anchor=MSO_ANCHOR.TOP)
-    _para(tf, sd.get("title", ""), size=34, color=INK, bold=True,
-          line_spacing=1.15, first=True, space_after=10)
-
-    note = (sd.get("note") or "").strip()
-    if note:
-        _para(tf, note, size=15, color=INK_SOFT, line_spacing=1.5, space_after=0)
-
-    _footer(s, deck_title, page_no, total)
+def _render_repeater(slide, el, theme, slide_data, ctx):
+    arr = slide_data.get(el.get("bind", ""), [])
+    if not isinstance(arr, list):
+        return
+    maxn = el.get("maxItems")
+    if maxn:
+        arr = arr[:maxn]
+    item = el.get("item", {})
+    if el.get("render", "paragraphs") == "paragraphs":
+        _render_repeater_paragraphs(slide, el, arr, item, theme, slide_data, ctx)
+    else:
+        _render_repeater_boxes(slide, el, arr, item, theme, slide_data, ctx)
 
 
-def _bullets_slide(prs, sd, deck_title, page_no, total, section_label=None):
-    s = prs.slides.add_slide(prs.slide_layouts[_BLANK])
-    _bg(s, PAPER)
-
-    # 상단 메타 라인
-    top = Inches(0.7)
-    tf = _box(s, MARGIN, top, Inches(8), Inches(0.4))
-    _para(tf, (section_label or "OVERVIEW").upper(),
-          size=10, color=ACCENT, font=FONT_MONO, bold=True,
-          first=True, space_after=0)
-
-    tf = _box(s, SLIDE_W - MARGIN - Inches(4), top, Inches(4), Inches(0.4))
-    _para(tf, deck_title, size=10, color=INK_SOFT, font=FONT_MONO,
-          align=PP_ALIGN.RIGHT, first=True, space_after=0)
-
-    _line(s, MARGIN, Inches(1.15), SLIDE_W - MARGIN * 2, RULE, 0.5)
-
-    # 슬라이드 제목
-    tf = _box(s, MARGIN, Inches(1.5), SLIDE_W - MARGIN * 2, Inches(1.0))
-    _para(tf, sd.get("title", ""), size=32, color=INK, bold=True,
-          line_spacing=1.15, first=True, space_after=0)
-
-    # 선택적 부제
-    sub = (sd.get("subtitle") or "").strip()
-    body_top = Inches(2.7)
-    if sub:
-        tf = _box(s, MARGIN, Inches(2.5), SLIDE_W - MARGIN * 2, Inches(0.6))
-        _para(tf, sub, size=15, color=INK_SOFT, line_spacing=1.4,
-              first=True, space_after=0)
-        body_top = Inches(3.2)
-
-    # 본문 영역 — 좌측 인덱스 + 우측 텍스트의 2열 느낌
-    bullets = sd.get("bullets") or []
-    body = _box(s, MARGIN, body_top, SLIDE_W - MARGIN * 2,
-                SLIDE_H - body_top - Inches(0.9))
-
-    for i, b in enumerate(bullets):
-        # 번호 + em-dash + 본문 — 한 줄로 합쳐 들여쓰기 흉내
-        idx = f"{i+1:02d}"
-        # 인덱스(작게, 모노) — 같은 줄에 run으로 따로 추가
-        p = body.paragraphs[0] if i == 0 else body.add_paragraph()
-        p.alignment = PP_ALIGN.LEFT
-        p.space_after = Pt(14)
-        p.line_spacing = 1.5
-
-        r1 = p.add_run(); r1.text = idx + "   "
-        r1.font.size = Pt(11); r1.font.color.rgb = MUTE
-        r1.font.name = FONT_MONO; r1.font.bold = True
-
-        r2 = p.add_run(); r2.text = b
-        r2.font.size = Pt(18); r2.font.color.rgb = INK
-        r2.font.name = FONT_BODY
-
-    _footer(s, deck_title, page_no, total)
+def _render_repeater_paragraphs(slide, el, arr, item, theme, slide_data, ctx):
+    g = el["geom"]
+    tf = _box(slide, Inches(g["x"]), Inches(g["y"]), Inches(g["w"]), Inches(g["h"]))
+    ps = item.get("paraStyle", {})
+    runs = [e for e in item.get("elements", []) if e.get("kind") == "run"]
+    for i, it in enumerate(arr):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = _align_of(ps.get("align"))
+        p.space_after = Pt(ps.get("spaceAfter", 6))
+        if ps.get("lineSpacing") is not None:
+            p.line_spacing = ps["lineSpacing"]
+        for run in runs:
+            st = run.get("style", {})
+            if run.get("bind"):
+                txt = _resolve_bind(run["bind"], slide_data, ctx, item=it, index=i)
+            elif run.get("text") is not None:
+                txt = run["text"]
+            else:
+                txt = ""
+            txt = _apply_transforms(txt, run.get("transform"))
+            _run(p, txt,
+                 size=st.get("size", 18),
+                 color=_color(theme, st.get("color", "ink")),
+                 bold=st.get("bold", False),
+                 italic=st.get("italic", False),
+                 font=_font(theme, st.get("font", "body")))
 
 
-# ─────────────────────────────────────────────
-#  Utilities
-# ─────────────────────────────────────────────
-_ROMANS = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
-           "XI", "XII", "XIII", "XIV", "XV"]
-def _roman(n):
-    return _ROMANS[n] + "." if 0 < n < len(_ROMANS) else f"{n:02d}."
+def _render_repeater_boxes(slide, el, arr, item, theme, slide_data, ctx):
+    g = el["geom"]
+    item_geom = item.get("geom", {"x": 0, "y": 0, "w": g["w"], "h": 1})
+    direction = el.get("direction", "vertical")
+    columns = max(1, int(el.get("columns", 1)))
+    stride = el.get("stride", item_geom["h"])
+    spacing = el.get("spacing", 0.0)
+    overflow = el.get("overflow")
+    cell_w = g["w"] / columns if direction == "grid" else item_geom["w"]
+
+    for i, it in enumerate(arr):
+        if direction == "grid":
+            ox = g["x"] + (i % columns) * cell_w
+            oy = g["y"] + (i // columns) * (stride + spacing)
+        elif direction == "horizontal":
+            ox = g["x"] + i * (item_geom["w"] + spacing)
+            oy = g["y"]
+        else:  # vertical
+            ox = g["x"]
+            oy = g["y"] + i * (stride + spacing)
+        if overflow == "clip" and oy + item_geom["h"] > g["y"] + g["h"] + 0.01:
+            break
+        for sub in item.get("elements", []):
+            _render_box_child(slide, sub, ox, oy, theme, slide_data, ctx, it, i)
+
+
+def _render_box_child(slide, sub, ox, oy, theme, slide_data, ctx, item, index):
+    kind = sub.get("kind")
+    g = sub.get("geom", {"x": 0, "y": 0, "w": 1, "h": 1})
+    ax = ox + g.get("x", 0)
+    ay = oy + g.get("y", 0)
+    if kind == "rect":
+        _rect(slide, Inches(ax), Inches(ay), Inches(g["w"]), Inches(g["h"]),
+              _color(theme, sub["fill"]))
+        return
+    if kind == "line":
+        _line(slide, Inches(ax), Inches(ay), Inches(g["w"]),
+              _color(theme, sub["color"]), sub.get("thicknessPt", 0.75))
+        return
+    if kind in ("text", "bound", "run"):
+        style = sub.get("style", {})
+        if kind == "text":
+            txt = _apply_transforms(sub.get("text", ""), sub.get("transform"))
+        else:
+            txt = _apply_transforms(
+                _resolve_bind(sub.get("bind", ""), slide_data, ctx, item, index),
+                sub.get("transform"),
+            )
+            if not txt:
+                txt = sub.get("fallback", "")
+        if not txt:
+            return
+        tf = _box(slide, Inches(ax), Inches(ay), Inches(g["w"]), Inches(g["h"]),
+                  anchor=_anchor_of(style.get("anchor")))
+        _style_para(tf, txt, theme, style)
+
+
+def _render_image(slide, el, ctx):
+    """이미지 에셋 렌더 — (project_id, asset)로 디스크 경로 해석 후 add_picture."""
+    asset_id = el.get("asset")
+    pid = ctx.get("project_id")
+    if not asset_id or pid is None:
+        return
+    # 지연 import — builder↔service 순환 및 __main__ 단독 실행 보호
+    from app.services.ppt_template_asset_service import resolve_asset_path
+
+    path = resolve_asset_path(pid, asset_id)
+    if not path or not path.is_file():
+        logger.warning("image asset missing: project=%s asset=%s", pid, asset_id)
+        return
+    g = el["geom"]
+    slide.shapes.add_picture(
+        str(path), Inches(g["x"]), Inches(g["y"]), Inches(g["w"]), Inches(g["h"])
+    )
+
+
+def _render_element(slide, el, theme, slide_data, ctx):
+    vif = el.get("visibleIf")
+    if vif and not slide_data.get(vif):
+        return
+    kind = el.get("kind")
+    if kind == "rect":
+        g = el["geom"]
+        _rect(slide, Inches(g["x"]), Inches(g["y"]), Inches(g["w"]), Inches(g["h"]),
+              _color(theme, el["fill"]))
+    elif kind == "line":
+        g = el["geom"]
+        _line(slide, Inches(g["x"]), Inches(g["y"]), Inches(g["w"]),
+              _color(theme, el["color"]), el.get("thicknessPt", 0.75))
+    elif kind in ("text", "bound", "pageNumber"):
+        _render_text(slide, el, kind, theme, slide_data, ctx)
+    elif kind == "repeater":
+        _render_repeater(slide, el, theme, slide_data, ctx)
+    elif kind == "image":
+        _render_image(slide, el, ctx)
+    else:
+        logger.warning("unknown element kind %r", kind)
 
 
 # ─────────────────────────────────────────────
 #  Builder
 # ─────────────────────────────────────────────
-def build_pptx(deck) -> bytes:
+def build_pptx(deck, template: dict | None = None, *, project_id: int | None = None) -> bytes:
+    tpl = template or DEFAULT_TEMPLATE
     prs = Presentation()
-    prs.slide_width = SLIDE_W
-    prs.slide_height = SLIDE_H
+    sl = tpl.get("slide", {})
+    prs.slide_width = Inches(sl.get("w", 13.333))
+    prs.slide_height = Inches(sl.get("h", 7.5))
+
+    theme = tpl.get("theme", {})
+    blocks = tpl.get("blocks", [])
+    by_type = {b["type"]: b for b in blocks}
+    fallback_block = by_type.get("bullets") or (blocks[0] if blocks else None)
 
     slides = deck["slides"]
     total = len(slides)
     section_no = 0
-    current_section_title = None
+    section_title = None
 
     for i, sd in enumerate(slides):
-        t = sd["type"]
-        page_no = i + 1
-        if t == "title":
-            _title_slide(prs, sd, deck["title"])
-        elif t == "section":
+        stype = sd.get("type")
+        if stype == "section":
             section_no += 1
-            current_section_title = sd.get("title", "")
-            _section_slide(prs, sd, section_no, deck["title"], page_no, total)
-        else:
-            _bullets_slide(prs, sd, deck["title"], page_no, total,
-                           section_label=current_section_title)
+            section_title = sd.get("title", "")
+        block = by_type.get(stype) or fallback_block
+        if not block:
+            continue
+        ctx = {
+            "deck": deck,
+            "page_no": i + 1,
+            "total": total,
+            "section_no": section_no,
+            "section_title": section_title,
+            "project_id": project_id,
+        }
+        s = prs.slides.add_slide(prs.slide_layouts[_BLANK])
+        _bg(s, _color(theme, block.get("bg", "paper")))
+        for el in block.get("elements", []):
+            try:
+                _render_element(s, el, theme, sd, ctx)
+            except Exception:
+                logger.warning("element render failed (kind=%r)", el.get("kind"),
+                               exc_info=True)
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -265,7 +406,7 @@ def build_pptx(deck) -> bytes:
 
 
 # ─────────────────────────────────────────────
-#  실행  (python _design_builder_proto.py → 샘플 .pptx 생성)
+#  실행  (python builder.py → 샘플 .pptx 생성)
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     DECK = {

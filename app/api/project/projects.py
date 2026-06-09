@@ -42,7 +42,6 @@ def create_project(payload: CreateProjectRequest, user: CurrentUser) -> dict:
     return project
 
 
-
 @router.delete("/{project_id}")
 def delete_project(project_id: int, user: CurrentUser) -> dict:
     """본인 프로젝트 삭제. 없거나 남의 것이면 404 (존재 자체 은닉)."""
@@ -51,3 +50,22 @@ def delete_project(project_id: int, user: CurrentUser) -> dict:
         raise HTTPException(404, "project not found")
     rag_service.cleanup_project(project_id)
     return {"ok": True}
+
+
+@router.patch("/{project_id}")
+def update_project(project_id:int, payload: CreateProjectRequest, user:CurrentUser) -> dict:
+    """프로젝트 업데이트"""
+    try:
+        ok = project_repo.update_project(
+            project_id, 
+            user["id"],
+            payload.name, 
+            payload.description, 
+            )
+    except Exception as e:
+        logger.exception("update_project failed")
+        raise HTTPException(500, str(e))
+    if not ok:
+        raise HTTPException(404, "project not found")
+    return {"ok": True}
+        
